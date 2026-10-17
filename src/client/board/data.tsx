@@ -15,7 +15,7 @@ import { messageOf } from './format.ts'
 import { IconButton, Tile, TileHead } from './tile.tsx'
 
 /** A file bigger than this is refused before it is parsed. */
-const MAX_FILE_BYTES = 16 * 1024 * 1024
+const MAX_FILE_BYTES = 64 * 1024 * 1024
 
 /** `YYY-MM-DD` from an ISO instant, for the download's name. */
 function fileStamp(iso: string): string {
@@ -24,7 +24,7 @@ function fileStamp(iso: string): string {
 
 /** Read a picked file and check it looks like one of ours. */
 async function stage(file: File): Promise<StagedFile> {
-  if (file.size > MAX_FILE_BYTES) throw new Error('文件超过 16 MB，可能不是本插件的备份')
+  if (file.size > MAX_FILE_BYTES) throw new Error('文件超过 64 MB，可能不是本插件的备份')
   let parsed: unknown
   try {
     parsed = JSON.parse(await file.text())
@@ -100,10 +100,22 @@ export function DataCard({ client, onImported }: DataCardProps): JSX.Element {
       dispatch({ kind: 'imported' })
       setError(null)
       setNote(`导入完成：${done.days} 天、${done.media} 影视书籍、${done.tasks} 任务`
+        + (done.assets === 0 ? '' : `、${done.assets} 张图片`)
         + (done.removed === 0 ? '' : `，清掉 ${done.removed} 条本地多余记录`))
       onImported()
     } catch (cause) {
       dispatch({ kind: 'import-failed' })
+      report(cause)
+    }
+  }
+
+  /** Delete every material image nothing references. */
+  const sweep = async (): Promise<void> => {
+    try {
+      const result = await client.sweepAssets()
+      setError(null)
+      setNote(result.removed === 0 ? '没有可清理的图片' : `已清理 ${result.removed} 张未引用的图片`)
+    } catch (cause) {
       report(cause)
     }
   }
@@ -116,6 +128,9 @@ export function DataCard({ client, onImported }: DataCardProps): JSX.Element {
           <button type="button" className="pt-primary" disabled={busy} onClick={() => void download()}>导出</button>
           <button type="button" className="pt-ghost" disabled={busy} onClick={() => picker.current?.click()}>
             选择备份…
+          </button>
+          <button type="button" className="pt-ghost" disabled={busy} onClick={() => void sweep()}>
+            清理未引用图片
           </button>
           <input
             ref={picker}

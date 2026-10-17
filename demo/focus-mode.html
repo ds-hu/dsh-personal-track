@@ -1,0 +1,1335 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>专注模式 · personal-track demo</title>
+<style>
+  /* ------------------------------------------------------------------ *
+   * personal-track 专注模式 demo —— 零依赖单文件。
+   *
+   * 视觉语言照搬插件本体的 .pt- 体系：半透明灰面（随明暗主题自适应）、
+   * 绿色 accent（完成/专注）、蓝色 info（主动作）、三档按钮。
+   *
+   * 全屏布局（v2，按评审意见重排）：
+   *   左列（窄）：名称 / 学科·DDL / 专注时长（大）+ 当前时间（小字）
+   *               / 笔记（占满余高）
+   *   右列：上 = 细工具条（进度 + 屏幕全屏 + 退出）
+   *         下 = 素材流 materials = Array<Markdown | Image>
+   * 数据是假的，交互是真的：进度拖动、防抖自动保存、粘贴/拖入图片、
+   * Markdown 文本块的编辑与渲染、原生全屏、专注秒表（localStorage 持久）。
+   * ------------------------------------------------------------------ */
+  :root {
+    color-scheme: light dark;
+    --pt-surface: rgba(127,127,127,.07);
+    --pt-surface-2: rgba(127,127,127,.13);
+    --pt-line: rgba(127,127,127,.18);
+    --pt-line-strong: rgba(127,127,127,.34);
+    --pt-accent: rgba(90,175,120,.95);
+    --pt-accent-soft: rgba(90,175,120,.15);
+    --pt-accent-line: rgba(90,175,120,.48);
+    --pt-info: rgba(96,150,215,.3);
+    --pt-info-soft: rgba(96,150,215,.15);
+    --pt-info-line: rgba(96,150,215,.45);
+    --pt-red: rgba(232,96,96,.95);
+    --pt-red-soft: rgba(232,96,96,.14);
+    --pt-red-line: rgba(232,96,96,.45);
+    --pt-orange: rgba(232,150,72,.95);
+    --pt-yellow: rgba(214,190,86,.95);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font: 13px/1.45 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #f4f5f6; color: #1c1e21; min-height: 100vh;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #101215; color: #d8dce1; }
+  }
+  button { font: inherit; color: inherit; }
+  .pt-muted { opacity: .6; }
+  .pt-grow { flex: 1; }
+
+  /* ---- 按钮三档 ------------------------------------------------------- */
+  .pt-primary {
+    appearance: none; border: 1px solid var(--pt-info-line); background: var(--pt-info-soft);
+    border-radius: 8px; padding: 4px 10px; font-size: 12px; font-weight: 500; cursor: pointer;
+    transition: background .12s ease, transform .08s ease;
+  }
+  .pt-primary:hover:not(:disabled) { background: var(--pt-info); }
+  .pt-primary:active:not(:disabled) { transform: scale(.97); }
+  .pt-primary:disabled { opacity: .4; cursor: default; }
+  .pt-ghost {
+    appearance: none; border: 1px solid var(--pt-line); background: transparent;
+    border-radius: 8px; padding: 4px 9px; font-size: 12px; opacity: .8; cursor: pointer;
+    transition: background .12s ease, opacity .12s ease, transform .08s ease;
+  }
+  .pt-ghost:hover:not(:disabled) { background: var(--pt-surface-2); opacity: 1; }
+  .pt-ghost:active:not(:disabled) { transform: scale(.97); }
+  .pt-icon {
+    appearance: none; width: 22px; height: 22px; flex: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid transparent; background: transparent; border-radius: 6px;
+    font-size: 13px; line-height: 1; opacity: .7; cursor: pointer;
+    transition: background .12s ease, border-color .12s ease, opacity .12s ease;
+  }
+  .pt-icon:hover:not(:disabled) { opacity: 1; background: var(--pt-surface-2); border-color: var(--pt-line); }
+  .pt-icon:disabled { opacity: .3; cursor: default; }
+
+  /* ---- 面板骨架：模拟主面板「习惯看板」 -------------------------------- */
+  .page { max-width: 1120px; margin: 0 auto; padding: 18px 20px 60px; }
+  @media (max-width: 640px) { .page { padding: 12px 12px 48px; } }
+  .panel-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  .panel-head h1 { margin: 0; font-size: 16px; font-weight: 650; }
+  .seg { display: inline-flex; border: 1px solid var(--pt-line); border-radius: 9px; overflow: hidden; }
+  .seg button {
+    appearance: none; border: 0; background: transparent; cursor: pointer;
+    padding: 4px 14px; font-size: 12px; opacity: .75; transition: background .12s ease, opacity .12s ease;
+  }
+  .seg button + button { border-left: 1px solid var(--pt-line); }
+  .seg button:hover { opacity: 1; }
+  .seg button.on { opacity: 1; background: var(--pt-info-soft); font-weight: 600; }
+
+  .track { display: flex; gap: 14px; align-items: flex-start; }
+  @media (max-width: 800px) { .track { flex-direction: column; } }
+
+  /* ---- 专注栏 --------------------------------------------------------- */
+  .focus-col {
+    flex: none; width: 300px; position: sticky; top: 14px;
+    display: flex; flex-direction: column; gap: 10px;
+    padding: 13px 14px; border: 1px solid var(--pt-line); border-radius: 14px;
+    background: var(--pt-surface);
+  }
+  @media (max-width: 800px) { .focus-col { width: auto; position: static; } }
+  .focus-label { font-size: 11px; letter-spacing: .07em; opacity: .55; }
+  .focus-clock { font-size: 34px; font-weight: 250; line-height: 1.05; font-variant-numeric: tabular-nums; }
+  .focus-date { font-size: 12px; opacity: .7; display: flex; align-items: center; gap: 6px; }
+  .night-badge {
+    border: 1px solid var(--pt-info-line); background: var(--pt-info-soft);
+    border-radius: 5px; padding: 0 5px; font-size: 10px;
+  }
+  .focus-summary { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+  .focus-summary svg { display: block; }
+  .ring-track { fill: none; stroke: var(--pt-surface-2); stroke-width: 4; }
+  .ring-fill { fill: none; stroke: var(--pt-accent); stroke-width: 4; stroke-linecap: round; transition: stroke-dashoffset .25s ease; }
+  .ring-text { display: flex; flex-direction: column; line-height: 1.15; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .ring-text small { font-weight: 400; font-size: 10px; opacity: .6; }
+  .focus-todo { font-size: 12px; opacity: .75; }
+  .focus-todo b { font-variant-numeric: tabular-nums; }
+
+  .focus-card { display: flex; flex-direction: column; gap: 7px; }
+  .focus-card-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+  .focus-card-title { font-weight: 650; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .focus-card-sub { font-size: 11px; opacity: .65; }
+  .focus-time { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--pt-accent); font-weight: 600; }
+  .focus-card-actions { display: flex; gap: 6px; margin-top: 2px; }
+
+  /* ---- 看板缩样 ------------------------------------------------------- */
+  .board { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+  .strip {
+    display: flex; align-items: center; gap: 12px;
+    padding: 9px 11px; border: 1px solid var(--pt-line); border-radius: 12px; background: var(--pt-surface);
+  }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
+  @media (max-width: 640px) { .grid { grid-template-columns: minmax(0,1fr); } }
+  .group { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 6px; margin: 3px 0 -2px; font-size: 11px; letter-spacing: .06em; opacity: .55; }
+  .tile {
+    display: flex; flex-direction: column; gap: 7px;
+    padding: 9px 10px; border: 1px solid var(--pt-line); border-radius: 12px;
+    background: var(--pt-surface); min-width: 0;
+    transition: background .12s ease, border-color .12s ease;
+  }
+  .tile:hover { background: var(--pt-surface-2); border-color: var(--pt-line-strong); }
+  .tile-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .tile-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tile-meta { margin-left: auto; font-size: 11px; opacity: .65; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .span2 { grid-column: 1 / -1; }
+
+  .badge {
+    display: inline-block; padding: 0 5px; border-radius: 5px; font-size: 10px;
+    border: 1px solid var(--pt-line-strong); background: var(--pt-surface-2);
+  }
+  .badge-ok { border-color: var(--pt-accent-line); background: var(--pt-accent-soft); }  .due-today { color: var(--pt-red); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .due-soon { color: var(--pt-orange); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .due-far { opacity: .6; font-variant-numeric: tabular-nums; }
+
+  /* 任务两行：head 说它是什么，foot 是进度条 */
+  .task { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .task + .task { margin-top: 6px; }
+  .task-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 6px; font-size: 12px; min-width: 0; }
+  .task-title { font-weight: 600; cursor: pointer; }
+  .task-title:hover { color: var(--pt-accent); }
+  .task-foot { display: flex; align-items: center; gap: 7px; min-width: 0; }
+  .task-count { flex: none; min-width: 5ch; text-align: center; font-size: 11px; opacity: .7; font-variant-numeric: tabular-nums; }
+  .task-count-live { opacity: 1; font-weight: 650; color: var(--pt-accent); }
+  .task-ok { font-size: 11px; color: var(--pt-accent); flex: none; }
+  .task-bar {
+    appearance: none; position: relative; flex: 1; min-width: 40px; height: 8px; padding: 0;
+    border: 1px solid var(--pt-line); border-radius: 4px;
+    background: var(--pt-surface-2); overflow: visible;
+    cursor: grab; touch-action: none; transition: border-color .12s ease;
+  }
+  .task-bar:hover, .task-bar:focus-visible { border-color: var(--pt-line-strong); outline: none; }
+  .task-bar:active { cursor: grabbing; }
+  .task-bar-plain { cursor: pointer; }
+  .task-fill {
+    display: block; height: 100%; border-radius: 3px;
+    background: linear-gradient(90deg, rgba(90,175,120,.8), rgba(130,205,155,.95));
+    transition: width .18s ease;
+  }
+  .task-thumb {
+    position: absolute; top: 50%; width: 12px; height: 12px; border-radius: 50%;
+    transform: translate(-50%, -50%); pointer-events: none;
+    border: 1px solid rgba(64,146,98,1); background: var(--pt-accent);
+    transition: transform .12s ease;
+  }
+  .task-bar:hover .task-thumb, .task-bar:focus-visible .task-thumb { transform: translate(-50%, -50%) scale(1.1); }
+  .task-bar-active .task-fill { transition: none; }
+  .task-bar-active .task-thumb { transform: translate(-50%, -50%) scale(1.15); }
+  .tick { position: absolute; top: 50%; width: 2px; height: 12px; transform: translate(-50%, -50%); background: var(--pt-line-strong); opacity: .5; border-radius: 1px; pointer-events: none; }
+  .tick-ok { background: rgba(64,146,98,1); opacity: 1; }
+
+  .list-row { display: flex; align-items: center; gap: 4px; }
+  .list-row + .list-row { margin-top: 4px; }
+  .list-text { flex: 1; min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row-open { cursor: pointer; }
+  .row-open:hover .list-text { color: var(--pt-accent); }
+
+  /* 统计视图占位 */
+  .stats-holder { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+
+  /* ==================================================================== *
+   * 专注模式（v2）：左信息列 + 右工具条与素材流
+   * ==================================================================== */
+  .focus-overlay {
+    /* 层次感：全屏内的线比看板显眼一档，卡片再多一层浅阴影；
+       去掉中部分隔线之后，靠这两样把「层」分开。 */
+    --pt-surface: rgba(127,127,127,.10);
+    --pt-surface-2: rgba(127,127,127,.17);
+    --pt-line: rgba(127,127,127,.28);
+    --pt-line-strong: rgba(127,127,127,.46);
+    --fo-shadow: 0 1px 3px rgba(0,0,0,.24);
+    position: fixed; inset: 0; z-index: 2147483000;
+    display: flex; flex-direction: column;
+    background: rgba(10, 12, 14, .82); backdrop-filter: blur(14px);
+    color: #e8ecef;
+    animation: fo-in .18s ease;
+  }
+  @media (prefers-color-scheme: light) {
+    .focus-overlay {
+      --fo-shadow: 0 1px 3px rgba(0,0,0,.07);
+      background: rgba(244, 245, 246, .9); color: #1c1e21;
+    }
+  }
+  @keyframes fo-in { from { opacity: 0; } to { opacity: 1; } }
+
+  .fo-layout { flex: 1; min-height: 0; display: flex; }
+
+  /* ---- 左列：信息 + 计时 + 笔记（窄） ---------------------------------- */
+  .fo-left {
+    flex: none; width: 320px; display: flex; flex-direction: column;
+    padding: 22px 18px 16px 22px; gap: 16px;
+    border-right: 1px solid var(--pt-line);
+    min-height: 0;
+  }
+  /* 标题、学科、DDL 三者各自成行，行距放宽，不挤成一团。 */
+  #fo-info { display: flex; flex-direction: column; gap: 9px; }
+  .fo-name { font-size: 19px; font-weight: 650; line-height: 1.45; overflow-wrap: anywhere; }
+  .fo-meta { font-size: 12px; opacity: .75; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; line-height: 1.7; }
+  .fo-meta .badge { opacity: 1; }
+
+  .fo-timers {
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    padding: 12px 0; border-top: 1px dashed var(--pt-line); text-align: center;
+  }
+  /* 专注时长：本场的主角数字（居中、绿且加粗）。累计藏在向上弹出的悬停里。 */
+  .fo-stopwatch {
+    font-size: 38px; font-weight: 500; line-height: 1.05;
+    font-variant-numeric: tabular-nums; color: var(--pt-accent);
+    width: fit-content; position: relative; cursor: default;
+    border-bottom: 1px dotted transparent; letter-spacing: .01em;
+  }
+  .fo-stopwatch:hover, .fo-stopwatch:focus-visible { border-bottom-color: var(--pt-accent-line); outline: none; }
+  .fo-stopwatch::after {
+    content: attr(data-tip);
+    position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%); z-index: 5;
+    white-space: nowrap; font-size: 11px; font-weight: 400; color: inherit;
+    background: var(--pt-surface-2); border: 1px solid var(--pt-line-strong);
+    border-radius: 7px; padding: 3px 8px;
+    opacity: 0; pointer-events: none; transition: opacity .12s ease;
+  }
+  .fo-stopwatch:hover::after, .fo-stopwatch:focus-visible::after { opacity: 1; }
+  .fo-now { font-size: 12px; opacity: .6; font-variant-numeric: tabular-nums; }
+
+  .fo-notes-card { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 7px; }
+  .fo-notes-head { display: flex; align-items: baseline; gap: 8px; font-size: 12px; font-weight: 600; }
+  .fo-save-state { font-size: 11px; font-weight: 400; opacity: .6; margin-left: auto; transition: opacity .15s ease; }
+  .fo-save-state.saving { opacity: 1; color: var(--pt-orange); }
+  .fo-save-state.saved { opacity: .75; color: var(--pt-accent); }
+  .fo-notes {
+    flex: 1; min-height: 120px; width: 100%;
+    border: 1px solid var(--pt-line-strong); background: var(--pt-surface-2);
+    color: inherit; border-radius: 10px; padding: 10px 12px;
+    font-family: system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-size: 13px; line-height: 1.7;
+    resize: none; outline: none; transition: border-color .12s ease;
+  }
+  .fo-notes:focus { border-color: var(--pt-info-line); }
+
+  /* ---- 右列：细工具条 + 素材流 ----------------------------------------- */
+  .fo-right { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  /* 顶部只有「进度」与右侧控制区，两者之间没有分隔线：进度吃掉除控制区
+     以外的全部宽度，并在控制区那一列的高度里垂直居中。 */
+  .fo-toolbar {
+    flex: none; display: flex; align-items: center; gap: 14px;
+    padding: 12px 16px 14px; min-height: 44px;
+  }
+  .fo-progress-box { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 7px; }
+  .fo-progress-row { display: flex; align-items: center; justify-content: center; gap: 10px; min-width: 0; }
+  .fo-progress-label { flex: none; font-size: 12px; opacity: .6; }
+  /* 进度条有上限，不随窗口无限拉长；整行居中。 */
+  .fo-toolbar .task-bar { height: 10px; border-radius: 5px; flex: 1 1 auto; min-width: 80px; max-width: 420px; }
+  .fo-toolbar .task-thumb { width: 14px; height: 14px; }
+  .fo-toolbar .tick { height: 14px; }
+  .fo-reading { font-size: 15px; font-weight: 250; font-variant-numeric: tabular-nums; flex: none; min-width: 4.5ch; text-align: right; }
+  .fo-reading b { font-weight: 650; }
+  /* 控制区：纵向两个按钮，每个都是图标 + 文字。 */
+  .fo-controls { flex: none; display: flex; flex-direction: column; gap: 6px; }
+  .fo-ctl {
+    appearance: none; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    min-width: 108px; padding: 9px 12px; cursor: pointer; white-space: nowrap;
+    border: 1px solid var(--pt-line); border-radius: 10px; background: var(--pt-surface);
+    box-shadow: var(--fo-shadow);
+    font-size: 12px; opacity: .88;
+    transition: background .12s ease, border-color .12s ease, opacity .12s ease;
+  }
+  .fo-ctl:hover { background: var(--pt-surface-2); border-color: var(--pt-line-strong); opacity: 1; }
+  .fo-ctl-icon { font-size: 13px; line-height: 1; }
+  .fo-ctl-danger:hover { background: var(--pt-red-soft); border-color: var(--pt-red-line); }
+  .fo-cp-row { display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; }
+  .cp-chip {
+    display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+    border: 1px solid var(--pt-line); border-radius: 999px;
+    padding: 2px 10px; font-size: 11px; opacity: .7;
+    font-variant-numeric: tabular-nums; background: transparent;
+    transition: background .12s ease, opacity .12s ease;
+  }
+  .cp-chip:hover { opacity: 1; background: var(--pt-surface-2); }
+  .cp-chip-ok { border-color: var(--pt-accent-line); background: var(--pt-accent-soft); opacity: 1; }
+  .cp-chip-ok .cp-dot { background: var(--pt-accent); }
+  .cp-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--pt-line-strong); }
+
+  .fo-materials { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 14px 18px 70px; }
+  .fo-mat-col { max-width: 820px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+  .fo-mat-head {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .fo-mat-title { font-size: 12px; font-weight: 600; }
+  .fo-mat-meta { font-size: 11px; opacity: .55; font-variant-numeric: tabular-nums; }
+  .fo-mat-actions { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+  .fo-drop {
+    border: 1px dashed var(--pt-line-strong); border-radius: 10px;
+    padding: 9px 12px; text-align: center; font-size: 12px; opacity: .6;
+    transition: border-color .12s ease, background .12s ease, opacity .12s ease;
+  }
+  .focus-overlay.dropping .fo-drop { border-color: var(--pt-accent); background: var(--pt-accent-soft); opacity: 1; }
+
+  /* ---- 素材：Markdown 文本块 ------------------------------------------- */
+  .fo-md { border: 1px solid var(--pt-line); border-radius: 12px; background: var(--pt-surface); overflow: hidden; box-shadow: var(--fo-shadow); }
+  .fo-md-head {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 10px; border-bottom: 1px solid var(--pt-line);
+    font-size: 11px; opacity: .85;
+  }
+  .fo-md-head .pt-grow { flex: 1; }
+  .md-body { padding: 10px 14px; font-size: 13px; line-height: 1.75; }
+  .md-body h3, .md-body h4, .md-body h5 { margin: .7em 0 .3em; line-height: 1.35; }
+  .md-body h3 { font-size: 16px; } .md-body h4 { font-size: 14px; } .md-body h5 { font-size: 13px; }
+  .md-body p { margin: .35em 0; }
+  .md-body ul, .md-body ol { margin: .35em 0; padding-left: 1.5em; }
+  .md-body blockquote {
+    margin: .5em 0; padding: 2px 12px; border-left: 3px solid var(--pt-accent-line);
+    background: var(--pt-accent-soft); border-radius: 0 8px 8px 0; opacity: .92;
+  }
+  .md-body code {
+    border: 1px solid var(--pt-line); border-radius: 4px; background: var(--pt-surface-2);
+    padding: 0 4px; font-size: .92em;
+  }
+  .md-body pre { margin: .5em 0; }
+  .md-body pre code { display: block; padding: 8px 10px; overflow-x: auto; }
+  .md-body a { color: inherit; }
+  .fo-md-edit {
+    width: 100%; border: 0; background: var(--pt-surface-2); color: inherit;
+    font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; line-height: 1.7;
+    padding: 10px 14px; min-height: 130px; resize: vertical; outline: none;
+  }
+
+  /* ---- 素材：图片 ------------------------------------------------------- */
+  .fo-img-wrap { position: relative; }
+  .fo-img {
+    display: block; width: 100%; border-radius: 10px;
+    border: 1px solid var(--pt-line); cursor: zoom-in; background: var(--pt-surface-2);
+  }
+  .fo-img-full { cursor: zoom-out; width: auto; max-width: none; }
+  .fo-img-scroller { overflow: auto; max-height: 74vh; border-radius: 10px; }
+  .fo-img-del {
+    position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--pt-line); border-radius: 8px; font-size: 13px;
+    background: rgba(20,22,25,.65); color: #eee; opacity: 0;
+    transition: opacity .12s ease, background .12s ease;
+    backdrop-filter: blur(4px);
+  }
+  @media (prefers-color-scheme: light) {
+    .fo-img-del { background: rgba(250,250,250,.75); color: #222; }
+  }
+  .fo-img-wrap:hover .fo-img-del { opacity: 1; }
+  .fo-img-del:hover { background: var(--pt-red-soft); border-color: var(--pt-red-line); }
+
+  /* ---- 手机端：单列、整层一滚动、工具条吸顶 ---------------------------- */
+  @media (max-width: 720px) {
+    .fo-layout { flex-direction: column; overflow-y: auto; }
+    .fo-left {
+      width: auto; border-right: 0; border-bottom: 1px solid var(--pt-line);
+      padding: 12px 14px 10px; gap: 8px;
+    }
+    .fo-name { font-size: 17px; line-height: 1.4; }
+    #fo-info { gap: 6px; }
+    .fo-timers { flex-direction: row; justify-content: center; align-items: baseline; gap: 10px; padding: 6px 0; }
+    .fo-stopwatch { font-size: 28px; }
+    .fo-notes-card { flex: none; }
+    .fo-notes { min-height: 90px; max-height: 40vh; resize: vertical; }
+    .fo-right { flex: none; }
+    /* 工具条吸顶：进度与两个控制按钮在长素材里始终可及 */
+    .fo-toolbar {
+      position: sticky; top: 0; z-index: 4;
+      background: rgba(14,16,19,.92); backdrop-filter: blur(10px);
+      padding: 8px 10px; gap: 8px;
+    }
+    .fo-progress-label { font-size: 11px; }
+    .fo-progress-row { gap: 7px; }
+    /* 窄屏不设上限：横向空间本来就紧。 */
+    .fo-toolbar .task-bar { max-width: none; }
+    .fo-controls { gap: 5px; }
+    .fo-ctl { min-width: 84px; padding: 4px 7px; font-size: 11px; gap: 5px; }
+    .fo-reading { font-size: 13px; min-width: 4ch; }
+    /* 会溢出时靠左，否则居中会让最左边的 chip 滚不到。 */
+    .fo-cp-row { overflow-x: auto; flex-wrap: nowrap; justify-content: flex-start; }
+    .fo-materials { overflow: visible; padding: 12px 12px 60px; }
+    .fo-img-scroller { max-height: 62vh; }
+    .fo-mat-actions { margin-left: 0; width: 100%; }
+    .fo-mat-actions .pt-primary, .fo-mat-actions .pt-ghost { flex: 1; padding: 7px 8px; }
+  }
+  @media (max-width: 720px) and (prefers-color-scheme: light) {
+    .fo-toolbar { background: rgba(244,245,246,.94); }
+  }
+
+  /* toast */
+  .toast {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+    z-index: 2147483600; padding: 8px 16px; border-radius: 10px;
+    border: 1px solid var(--pt-red-line); background: var(--pt-red-soft);
+    font-size: 12px; opacity: 0; pointer-events: none;
+    transition: opacity .18s ease; max-width: 80vw;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="page" id="page"></div>
+<div id="overlay-root"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict'
+/* ======================================================================
+ * 假数据与持久化（localStorage 模拟宿主：笔记 / Markdown 素材 / 专注会话 / 置顶）
+ * ==================================================================== */
+const pad = n => String(n).padStart(2, '0')
+const todayText = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+const dueToday = todayText()
+const dueSoon = (() => {
+  const d = new Date(Date.now() + 2 * 86400000)
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+})()
+
+const ENTRIES = {
+  t1: {
+    kind: 'task', title: '线性代数作业 §3.2–3.4', category: '线性代数',
+    due: dueToday, total: 20, current: 13,
+    checkpoints: [{ label: '第一章', at: 10 }, { label: '第二章', at: 16 }, { label: '第三章', at: 20 }],
+    notes: '3.3 的证明题要抄题干。\n错题：T7（基变换矩阵写反了）。',
+  },
+  t2: {
+    kind: 'task', title: '预约体检', category: null,
+    due: dueSoon, total: null, current: 0, checkpoints: [], notes: '',
+  },
+  m1: {
+    kind: 'media', sub: 'book', title: '三体 II：黑暗森林', status: 'active', rating: 5,
+    notes: '面壁计划的设定太妙了。第 184 页有句想抄下来的……',
+  },
+  m2: {
+    kind: 'media', sub: 'film', title: '沙丘 2', status: 'done', rating: 4, notes: '',
+  },
+}
+
+const store = {
+  get(key, fallback) {
+    try { const raw = localStorage.getItem('pt-demo:' + key); return raw === null ? fallback : JSON.parse(raw) }
+    catch { return fallback }
+  },
+  set(key, value) { localStorage.setItem('pt-demo:' + key, JSON.stringify(value)) },
+}
+/* 首次打开：给「线代作业」两段历史专注会话与一块 Markdown 素材。 */
+if (!store.get('seeded', false)) {
+  const now = Date.now()
+  store.set('sessions:t1', [
+    { s: now - 3 * 86400000 - 47 * 60000, e: now - 3 * 86400000 },
+    { s: now - 86400000 - 32 * 60000, e: now - 86400000 },
+  ])
+  store.set('mds:t1', [
+    '## §3.2–3.4 要点\n'
+    + '- **基变换**：`B′ = PB`，坐标随之左乘 `P⁻¹`\n'
+    + '- **秩–零化度**：`rank A + dim N(A) = n`\n'
+    + '- 相似对角化：需要 n 个线性无关的特征向量\n'
+    + '\n'
+    + '> T7 先算 `rank(A−λI)`，再套秩不等式，比直接展开快得多。',
+  ])
+  store.set('seeded', true)
+}
+
+/* ======================================================================
+ * 小工具
+ * ==================================================================== */
+const $page = document.getElementById('page')
+const $overlayRoot = document.getElementById('overlay-root')
+const $toast = document.getElementById('toast')
+let toastTimer = 0
+function toast(text) {
+  $toast.textContent = text
+  $toast.classList.add('show')
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => $toast.classList.remove('show'), 2600)
+}
+function esc(text) {
+  return String(text).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]))
+}
+function clockText(d = new Date()) {
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+function nowShort(d = new Date()) {
+  const week = ['日', '一', '二', '三', '四', '五', '六'][d.getDay()]
+  return `${pad(d.getHours())}:${pad(d.getMinutes())} · 周${week}`
+}
+function dateLabelText(d = new Date()) {
+  const week = ['日', '一', '二', '三', '四', '五', '六'][d.getDay()]
+  const night = d.getHours() < 4 ? `<span class="night-badge">周${week}夜</span>` : ''
+  return `习惯日 ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} · 周${week} ${night}`
+}
+function mmss(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), s = total % 60
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`
+}
+function cumulativeOf(id) {
+  const sessions = store.get('sessions:' + id, []).filter(x => x.e > 0)
+  return sessions.reduce((sum, x) => sum + (x.e - x.s), 0)
+}
+function dueClass(due) {
+  if (due === dueToday) return 'due-today'
+  if (Date.parse(due) - Date.parse(dueToday) <= 3 * 86400000) return 'due-soon'
+  return 'due-far'
+}
+function dueText(due) { return due === dueToday ? '今天' : due.slice(5) }
+function fmtBytes(n) {
+  return n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'
+}
+
+/* ======================================================================
+ * 迷你 Markdown：# ## ###、- / 1. 列表、> 引用、``` 代码块、
+ * **粗** *斜* `码` [链接](url)。够 demo 用，不追求完整 CommonMark。
+ * ==================================================================== */
+function renderMarkdown(src) {
+  const inline = s => esc(s)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/\*([^*]+)\*/g, '<i>$1</i>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
+  const out = []
+  let para = [], list = null, quote = [], code = null
+  const flushPara = () => { if (para.length) { out.push(`<p>${inline(para.join(' '))}</p>`); para = [] } }
+  const flushList = () => {
+    if (list) { out.push(`<${list.tag}>${list.items.map(item => `<li>${inline(item)}</li>`).join('')}</${list.tag}>`); list = null }
+  }
+  const flushQuote = () => {
+    if (quote.length) { out.push(`<blockquote>${inline(quote.join('<br>'))}</blockquote>`); quote = [] }
+  }
+  const flushAll = () => { flushPara(); flushList(); flushQuote() }
+  for (const raw of String(src).split(/\r?\n/)) {
+    if (code !== null) {
+      if (raw.trim() === '```') { out.push(`<pre><code>${esc(code.join('\n'))}</code></pre>`); code = null }
+      else code.push(raw)
+      continue
+    }
+    if (raw.trim() === '```') { flushAll(); code = []; continue }
+    if (raw.trim() === '') { flushAll(); continue }
+    const heading = /^(#{1,3})\s+(.*)$/.exec(raw)
+    if (heading) { flushAll(); out.push(`<h${heading[1].length + 2}>${inline(heading[2])}</h${heading[1].length + 2}>`); continue }
+    const quoted = /^>\s?(.*)$/.exec(raw)
+    if (quoted) { flushPara(); flushList(); quote.push(quoted[1]); continue }
+    const bullet = /^[-•]\s+(.*)$/.exec(raw)
+    if (bullet) {
+      flushPara(); flushQuote()
+      if (!list || list.tag !== 'ul') { flushList(); list = { tag: 'ul', items: [] } }
+      list.items.push(bullet[1]); continue
+    }
+    const numbered = /^\d+[.、]\s+(.*)$/.exec(raw)
+    if (numbered) {
+      flushPara(); flushQuote()
+      if (!list || list.tag !== 'ol') { flushList(); list = { tag: 'ol', items: [] } }
+      list.items.push(numbered[1]); continue
+    }
+    flushList(); flushQuote()
+    para.push(raw)
+  }
+  if (code !== null) out.push(`<pre><code>${esc(code.join('\n'))}</code></pre>`)
+  flushAll()
+  return out.join('\n')
+}
+
+/* ======================================================================
+ * 看板页（打卡视图缩样 + 统计占位）
+ * ==================================================================== */
+let view = 'board'
+
+function taskRowHTML(id) {
+  const t = ENTRIES[id]
+  const quantized = t.total != null && t.total > 0
+  const ratio = quantized ? Math.min(1, t.current / t.total) : (t.current > 0 ? 1 : 0)
+  const pct = Math.round(ratio * 100)
+  const ticks = quantized
+    ? t.checkpoints.map(cp => `<span class="tick ${t.current >= cp.at ? 'tick-ok' : ''}" style="left:${Math.round(cp.at / t.total * 100)}%"></span>`).join('')
+    : ''
+  const done = quantized ? t.current >= t.total : t.current > 0
+  return `
+    <div class="task" data-entry="${id}">
+      <div class="task-head">
+        <span class="task-title" data-open="1">${esc(t.title)}</span>
+        ${t.category ? `<span class="pt-muted">(${esc(t.category)})</span>` : ''}
+        ${t.due ? `<span class="${dueClass(t.due)}">截止于${dueText(t.due)}</span>` : ''}
+        <span class="pt-grow"></span>
+        <button class="pt-icon" title="进入专注模式" data-open="1">⤢</button>
+      </div>
+      <div class="task-foot">
+        <button class="task-bar ${quantized ? '' : 'task-bar-plain'}" data-bar="1"
+          aria-label="${esc(t.title)} 进度" aria-valuemin="0" aria-valuemax="${quantized ? t.total : 1}" aria-valuenow="${t.current}">
+          <span class="task-fill" style="width:${pct}%"></span>
+          ${quantized ? '<span class="task-thumb" style="left:' + pct + '%"></span>' : ''}
+          ${ticks}
+        </button>
+        ${quantized ? `<span class="task-count">${t.current}/${t.total}</span>` : ''}
+        ${done ? '<span class="task-ok" title="已完成">✓</span>' : ''}
+      </div>
+    </div>`
+}
+
+function mediaRowHTML(id) {
+  const m = ENTRIES[id]
+  const statusLabel = { active: '在看/在读', done: '完成', dropped: '弃' }[m.status]
+  return `
+    <div class="list-row" data-entry="${id}">
+      <span class="list-text row-open" data-open="1">
+        <span class="badge ${m.status === 'done' ? 'badge-ok' : ''}">${m.sub === 'film' ? '影' : '书'}</span>
+        ${esc(m.title)}${m.rating ? `<span class="pt-muted"> ★${m.rating}</span>` : ''}
+        <span class="pt-muted"> · ${statusLabel}</span>
+      </span>
+      <button class="pt-icon" title="进入专注模式" data-open="1">⤢</button>
+    </div>`
+}
+
+function boardHTML() {
+  return `
+    <div class="track">
+      <aside class="focus-col" id="focus-col"></aside>
+      <div class="board">
+        <div class="strip" id="strip"></div>
+        <div class="grid">
+          <div class="group">记录</div>
+          <div class="tile span2">
+            <div class="tile-head"><span class="tile-title">任务 / 作业</span><span class="tile-meta">未完成 2 · 今日到期 1</span></div>
+            ${taskRowHTML('t1')}
+            ${taskRowHTML('t2')}
+          </div>
+          <div class="tile span2">
+            <div class="tile-head"><span class="tile-title">影视 / 书籍</span><span class="tile-meta">在列 1</span></div>
+            ${mediaRowHTML('m1')}
+            ${mediaRowHTML('m2')}
+          </div>
+        </div>
+      </div>
+    </div>`
+}
+
+/* 统计视图：骨架（真实实现里是完整的热力图、指标卡与心率-配速曲线）。 */
+function statsHTML() {
+  const rows = ['洗漱', '洗澡', '早饭', '午饭', '晚饭', '背单词', '多邻国']
+  const days = 21
+  const pattern = [1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0]
+  return `
+    <div class="tile span2">
+      <div class="tile-head"><span class="tile-title">完成热力图</span><span class="tile-meta">${days} 天 · 完美日 3</span></div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        ${rows.map((label, r) => `
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="width:3.6em;font-size:11px;opacity:.7">${label}</span>
+            <span style="display:flex;gap:2px;flex:1;overflow:hidden">
+              ${Array.from({ length: days }, (_, i) =>
+                `<span style="width:10px;height:10px;border-radius:3px;flex:none;background:${pattern[(i + r * 3) % pattern.length] === 1 ? 'var(--pt-accent)' : 'var(--pt-surface-2)'}"></span>`).join('')}
+            </span>
+            <span style="width:4.2em;text-align:right;font-size:11px;opacity:.7">${15 - (r % 4)}/${days}</span>
+          </div>`).join('')}
+      </div>
+    </div>
+    <div class="tile">
+      <div class="tile-head"><span class="tile-title">背单词</span></div>
+      <div style="font-size:12px;display:flex;flex-direction:column;gap:3px">
+        <span><span class="pt-muted">新词 / 复习</span>　<b>312 / 940</b></span>
+        <span><span class="pt-muted">达标天数</span>　<b>14 / ${days}</b></span>
+        <span><span class="pt-muted">总时长</span>　<b>1 286 分</b></span>
+      </div>
+    </div>
+    <div class="tile">
+      <div class="tile-head"><span class="tile-title">跑步</span></div>
+      <div style="font-size:12px;display:flex;flex-direction:column;gap:3px">
+        <span><span class="pt-muted">次数</span>　<b>9</b></span>
+        <span><span class="pt-muted">里程</span>　<b>48.6 km</b></span>
+        <span><span class="pt-muted">平均心率</span>　<b>152</b></span>
+      </div>
+    </div>`
+}
+
+function stripHTML() {
+  const cells = [1, 1, 1, .5, 0, 1, 0, 1, .65]
+  const done = cells.reduce((a, b) => a + b, 0)
+  const C = 2 * Math.PI * 18
+  return `
+    <div class="focus-summary">
+      <svg width="44" height="44" viewBox="0 0 44 44">
+        <circle class="ring-track" cx="22" cy="22" r="18"></circle>
+        <circle class="ring-fill" cx="22" cy="22" r="18" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - done / cells.length)}" transform="rotate(-90 22 22)"></circle>
+      </svg>
+      <span class="ring-text">${done.toFixed(1)}/${cells.length}<small>今日</small></span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:5px;flex:1;min-width:0">
+      <div style="display:flex;gap:3px;flex-wrap:wrap" id="strip-marks">
+        ${cells.map(v => `<span style="display:block;width:12px;height:12px;overflow:hidden;border:1px solid var(--pt-line-strong);border-radius:3px;background:var(--pt-surface-2)">
+          <span style="display:block;height:100%;width:${Math.round(v * 100)}%;background:linear-gradient(90deg,rgba(90,175,120,.95),rgba(146,215,170,.9))"></span>
+        </span>`).join('')}
+      </div>
+    </div>`
+}
+
+/* 专注栏：置顶卡片或空态（时钟 + 摘要） */
+let pinned = store.get('pinned', null)
+function renderFocusCol() {
+  const col = document.getElementById('focus-col')
+  if (!col) return
+  if (pinned && ENTRIES[pinned]) {
+    const e = ENTRIES[pinned]
+    const cumul = cumulativeOf(pinned)
+    const sub = e.kind === 'task'
+      ? (e.total ? `进度 ${e.current}/${e.total}` : '勾选型') + (e.due ? ` · 截止于${dueText(e.due)}` : '')
+      : (e.sub === 'film' ? '影' : '书') + ' · ' + ({ active: '在看/在读', done: '完成', dropped: '弃' }[e.status])
+    col.innerHTML = `
+      <span class="focus-label">专注栏 · 最近专注</span>
+      <div class="focus-card">
+        <div class="focus-card-head">
+          <span class="focus-card-title">${esc(e.title)}</span>
+          <button class="pt-icon" title="取消置顶" id="unpin">×</button>
+        </div>
+        <span class="focus-card-sub">${esc(sub)}</span>
+        <span class="focus-time" id="focus-cumul">累计专注 ${mmss(cumul)}</span>
+        <div class="focus-card-actions">
+          <button class="pt-primary" data-focus-open="${pinned}">继续专注</button>
+        </div>
+      </div>`
+    col.querySelector('#unpin').onclick = () => { pinned = null; store.set('pinned', null); renderFocusCol() }
+  } else {
+    col.innerHTML = `
+      <span class="focus-label">专注栏</span>
+      <div class="focus-clock" id="col-clock">${clockText()}</div>
+      <div class="focus-date" id="col-date">${dateLabelText()}</div>
+      <div class="focus-summary">
+        <svg width="44" height="44" viewBox="0 0 44 44">
+          <circle class="ring-track" cx="22" cy="22" r="18"></circle>
+          <circle class="ring-fill" cx="22" cy="22" r="18" stroke-dasharray="${2 * Math.PI * 18}" stroke-dashoffset="${2 * Math.PI * 18 * (1 - 6.15 / 9)}" transform="rotate(-90 22 22)"></circle>
+        </svg>
+        <span class="ring-text">6.2/9<small>今日</small></span>
+      </div>
+      <span class="focus-todo">剩余任务 <b>2</b> · 逾期 <b>0</b></span>`
+  }
+}
+
+function renderPage() {
+  $page.innerHTML = `
+    <div class="panel-head">
+      <h1>习惯看板</h1>
+      <div class="seg">
+        <button data-view="board" class="${view === 'board' ? 'on' : ''}">打卡</button>
+        <button data-view="stats" class="${view === 'stats' ? 'on' : ''}">统计</button>
+      </div>
+    </div>
+    ${view === 'board' ? boardHTML() : `<div class="grid">${statsHTML()}</div>`}`
+  $page.querySelectorAll('.seg button').forEach(btn => {
+    btn.onclick = () => { view = btn.dataset.view; renderPage() }
+  })
+  if (view === 'board') {
+    document.getElementById('strip').innerHTML = stripHTML()
+    bindBars($page)
+    renderFocusCol()
+  }
+}
+
+/* ======================================================================
+ * 看板里的进度条（拖动 / ←→ / 点按）
+ * ==================================================================== */
+function bindBars(root) {
+  root.querySelectorAll('[data-bar]').forEach(bar => {
+    const t = ENTRIES[bar.closest('[data-entry]').dataset.entry]
+    const quantized = t.total != null && t.total > 0
+    let drag = null
+    const ratioFrom = ev => {
+      const box = bar.getBoundingClientRect()
+      return box.width <= 0 ? 0 : Math.max(0, Math.min(1, (ev.clientX - box.left) / box.width))
+    }
+    const paint = ratio => {
+      const pct = Math.round(ratio * 100)
+      bar.querySelector('.task-fill').style.width = pct + '%'
+      const thumb = bar.querySelector('.task-thumb')
+      if (thumb) thumb.style.left = pct + '%'
+      bar.querySelectorAll('.tick').forEach((tick, i) => {
+        tick.classList.toggle('tick-ok', barValueOf(t, ratio) >= t.checkpoints[i].at)
+      })
+      const row = bar.closest('.task')
+      const count = row && row.querySelector('.task-count')
+      if (count) {
+        count.textContent = `${barValueOf(t, ratio)}/${t.total}`
+        count.classList.toggle('task-count-live', drag !== null)
+      }
+    }
+    bar.addEventListener('pointerdown', ev => {
+      if (!quantized) return
+      bar.setPointerCapture(ev.pointerId)
+      drag = ratioFrom(ev)
+      bar.classList.add('task-bar-active')
+      paint(drag)
+    })
+    bar.addEventListener('pointermove', ev => {
+      if (drag === null) return
+      drag = ratioFrom(ev)
+      paint(drag)
+    })
+    bar.addEventListener('pointerup', ev => {
+      if (drag === null) return
+      const next = barValueOf(t, ratioFrom(ev))
+      drag = null
+      bar.classList.remove('task-bar-active')
+      if (next !== t.current) { t.current = next; renderPage() }
+    })
+    bar.addEventListener('pointercancel', () => { drag = null; bar.classList.remove('task-bar-active'); renderPage() })
+    bar.addEventListener('click', () => {
+      if (quantized || drag !== null) return
+      t.current = t.current > 0 ? 0 : 1
+      renderPage()
+    })
+    bar.addEventListener('keydown', ev => {
+      const max = quantized ? t.total : 1
+      if (ev.key === 'ArrowRight' || ev.key === 'ArrowUp') { ev.preventDefault(); t.current = Math.min(max, t.current + 1); renderPage() }
+      else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowDown') { ev.preventDefault(); t.current = Math.max(0, t.current - 1); renderPage() }
+      else if (ev.key === 'Home') { ev.preventDefault(); t.current = 0; renderPage() }
+      else if (ev.key === 'End') { ev.preventDefault(); t.current = max; renderPage() }
+    })
+  })
+}
+function barValueOf(t, ratio) {
+  if (t.total == null || t.total <= 0) return ratio > 0 ? 1 : 0
+  return Math.max(0, Math.min(t.total, Math.round(ratio * t.total)))
+}
+
+/* 点击行 / ⤢ → 打开专注模式 */
+document.addEventListener('click', ev => {
+  const opener = ev.target.closest('[data-open]')
+  if (opener) {
+    openFocus(opener.closest('[data-entry]').dataset.entry)
+    return
+  }
+  const focusBtn = ev.target.closest('[data-focus-open]')
+  if (focusBtn) { openFocus(focusBtn.dataset.focusOpen) }
+})
+
+/* ======================================================================
+ * 专注模式
+ * ==================================================================== */
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+const focus = { id: null, openedAt: 0, tick: 0, saveTimer: 0, mdTimers: {}, materials: [] }
+
+function openFocus(id) {
+  if (focus.id !== null) return
+  focus.id = id
+  focus.openedAt = Date.now()
+  focus.mdTimers = {}
+  /* materials = Array<Markdown | Image>；Markdown 块持久在 localStorage，图片 demo 内存态。 */
+  focus.materials = store.get('mds:' + id, []).map(text => ({ kind: 'md', text, editing: false }))
+  pinned = id
+  store.set('pinned', id)
+
+  /* 专注会话：开始（未闭合的旧会话——比如上次关页——直接丢弃，时长未知即非事实） */
+  const sessions = store.get('sessions:' + id, []).filter(x => x.e > 0)
+  sessions.push({ s: focus.openedAt, e: 0 })
+  store.set('sessions:' + id, sessions)
+
+  renderOverlay()
+  const overlay = document.getElementById('fo')
+  if (overlay && overlay.requestFullscreen) {
+    overlay.requestFullscreen().catch(() => { /* 被拒：停留在页内全屏 */ })
+  }
+  focus.tick = setInterval(focusTick, 1000)
+}
+
+function closeFocus() {
+  if (focus.id === null) return
+  const id = focus.id
+  const sessions = store.get('sessions:' + id, [])
+  const last = sessions[sessions.length - 1]
+  if (last && last.e === 0) { last.e = Date.now(); store.set('sessions:' + id, sessions) }
+  clearInterval(focus.tick)
+  clearTimeout(focus.saveTimer)
+  for (const timer of Object.values(focus.mdTimers)) clearTimeout(timer)
+  focus.id = null
+  $overlayRoot.innerHTML = ''
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
+  renderPage()
+}
+
+function focusTick() {
+  if (focus.id === null) return
+  const sw = document.getElementById('fo-stopwatch')
+  if (sw) {
+    sw.textContent = mmss(Date.now() - focus.openedAt)
+    sw.dataset.tip = `累计专注 ${mmss(cumulativeOf(focus.id) + (Date.now() - focus.openedAt))}（含本段）`
+  }
+  const now = document.getElementById('fo-now')
+  if (now) now.textContent = nowShort()
+  const colClock = document.getElementById('col-clock')
+  if (colClock) colClock.textContent = clockText()
+}
+
+/* ---- 覆盖层 DOM ------------------------------------------------------ */
+function leftInfoHTML(e) {
+  const isTask = e.kind === 'task'
+  const done = isTask && (e.total != null && e.total > 0 ? e.current >= e.total : e.current > 0)
+  const meta = isTask
+    ? `${e.category ? `<span>${esc(e.category)}</span>` : ''}`
+      + (e.due ? `<span class="${dueClass(e.due)}">截止于${dueText(e.due)}</span>` : '')
+      + (done ? '<span class="badge badge-ok">已完成</span>' : '')
+    : `<span class="badge ${e.status === 'done' ? 'badge-ok' : ''}">${e.sub === 'film' ? '影' : '书'}</span>`
+      + `<span>${({ active: '在看/在读', done: '完成', dropped: '弃' }[e.status])}${e.rating ? ' · ★' + e.rating : ''}</span>`
+  return `
+    <div class="fo-name">${esc(e.title)}</div>
+    <div class="fo-meta">${meta}</div>`
+}
+
+function toolbarHTML(e) {
+  const isTask = e.kind === 'task'
+  const quantized = isTask && e.total != null && e.total > 0
+  const ratio = quantized ? Math.min(1, e.current / e.total) : (e.current > 0 ? 1 : 0)
+  const pct = Math.round(ratio * 100)
+  const ticks = quantized
+    ? e.checkpoints.map(cp => `<span class="tick ${e.current >= cp.at ? 'tick-ok' : ''}" style="left:${Math.round(cp.at / e.total * 100)}%"></span>`).join('')
+    : ''
+  const progressRow = quantized
+    ? `<div class="fo-progress-row">
+        <span class="fo-progress-label">进度</span>
+        <button class="pt-ghost" data-nudge="-1" title="减 1" style="padding:2px 10px">−</button>
+        <button class="task-bar" id="fo-bar" aria-label="进度" aria-valuemin="0" aria-valuemax="${e.total}" aria-valuenow="${e.current}">
+          <span class="task-fill" style="width:${pct}%"></span>
+          <span class="task-thumb" style="left:${pct}%"></span>
+          ${ticks}
+        </button>
+        <button class="pt-ghost" data-nudge="1" title="加 1" style="padding:2px 10px">＋</button>
+        <span class="fo-reading" id="fo-reading"><b>${e.current}</b>/${e.total}</span>
+      </div>`
+    : (isTask
+      ? `<div class="fo-progress-row"><button class="pt-primary" id="fo-toggle" style="padding:3px 14px">${e.current > 0 ? '标记未完成' : '标记完成'}</button></div>`
+      : '')
+  const cpRow = quantized
+    ? `<div class="fo-cp-row">${e.checkpoints.map(cp => `
+        <button class="cp-chip ${e.current >= cp.at ? 'cp-chip-ok' : ''}" data-cp="${cp.at}" title="进度跳到这里">
+          <span class="cp-dot"></span>${esc(cp.label)} @${cp.at} · ${e.current >= cp.at ? '已到' : '未到'}
+        </button>`).join('')}</div>`
+    : ''
+  return `
+    <div class="fo-toolbar">
+      <div class="fo-progress-box">${progressRow}${cpRow}</div>
+      <div class="fo-controls">
+        <button class="fo-ctl" id="fo-fs" title="切换浏览器全屏">
+          <span class="fo-ctl-icon">⤢</span><span id="fo-fs-label">屏幕全屏</span>
+        </button>
+        <button class="fo-ctl fo-ctl-danger" id="fo-close" title="退出专注（Esc）">
+          <span class="fo-ctl-icon">×</span>退出专注
+        </button>
+      </div>
+    </div>`
+}
+
+function renderOverlay() {
+  const id = focus.id
+  const e = ENTRIES[id]
+  const cumul = cumulativeOf(id)
+  $overlayRoot.innerHTML = `
+    <div class="focus-overlay" id="fo">
+      <div class="fo-layout">
+        <aside class="fo-left">
+          <div id="fo-info">${leftInfoHTML(e)}</div>
+          <div class="fo-timers">
+            <div class="fo-stopwatch" id="fo-stopwatch" tabindex="0"
+                 data-tip="累计专注 ${mmss(cumul)}（含本段）">${mmss(0)}</div>
+            <div class="fo-now" id="fo-now">${nowShort()}</div>
+          </div>
+          <div class="fo-notes-card">
+            <div class="fo-notes-head">笔记<span class="fo-save-state" id="fo-save">已保存</span></div>
+            <textarea class="fo-notes" id="fo-notes" placeholder="随手记：思路、待查、解题步骤……"></textarea>
+          </div>
+        </aside>
+        <div class="fo-right">
+          <div id="fo-toolbar-box">${toolbarHTML(e)}</div>
+          <div class="fo-materials" id="fo-materials">
+            <div class="fo-mat-col">
+              <div class="fo-mat-head">
+                <span class="fo-mat-title">素材</span>
+                <span class="fo-mat-meta" id="fo-mat-meta"></span>
+                <div class="fo-mat-actions">
+                  <button class="pt-ghost" id="fo-add-md" title="加一块 Markdown 文本">＋ 文本</button>
+                  <button class="pt-ghost" id="fo-gen">示例长图</button>
+                  <button class="pt-primary" id="fo-add">添加图片…</button>
+                </div>
+              </div>
+              <div class="fo-drop" id="fo-drop">粘贴或拖入图片</div>
+              <div id="fo-mat-list" style="display:flex;flex-direction:column;gap:12px"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`
+
+  const notes = document.getElementById('fo-notes')
+  notes.value = store.get('notes:' + id, e.notes || '')
+  notes.addEventListener('input', () => {
+    const state = document.getElementById('fo-save')
+    state.textContent = '保存中…'
+    state.className = 'fo-save-state saving'
+    clearTimeout(focus.saveTimer)
+    focus.saveTimer = setTimeout(() => {
+      store.set('notes:' + id, notes.value)
+      state.textContent = '已保存 ✓'
+      state.className = 'fo-save-state saved'
+    }, 800)
+  })
+
+  document.getElementById('fo-close').onclick = closeFocus
+  const fsBtn = document.getElementById('fo-fs')
+  fsBtn.onclick = () => {
+    const el = document.getElementById('fo')
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
+    else if (el.requestFullscreen) el.requestFullscreen().catch(() => toast('浏览器拒绝了全屏请求，已用页内全屏'))
+  }
+  onFsChange()
+
+  document.getElementById('fo-add').onclick = () => document.getElementById('fo-file-input')?.click()
+  document.getElementById('fo-gen').onclick = () => {
+    focus.materials.push({ kind: 'image', url: sampleLongImage(), bytes: 720 * 2600 / 3, name: '示例长图' })
+    renderMaterials()
+  }
+  document.getElementById('fo-add-md').onclick = () => {
+    focus.materials.push({ kind: 'md', text: '## 新文本块\n\n- 要点一\n- 要点二', editing: true })
+    saveMds()
+    renderMaterials()
+    const list = document.getElementById('fo-mat-list')
+    const last = list.lastElementChild
+    if (last) last.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }
+  const picker = document.createElement('input')
+  picker.type = 'file'
+  picker.accept = 'image/*'
+  picker.multiple = true
+  picker.style.display = 'none'
+  picker.id = 'fo-file-input'
+  document.getElementById('fo').append(picker)
+  picker.addEventListener('change', ev => {
+    addImages([...ev.target.files])
+    ev.target.value = ''
+  })
+
+  /* 拖放 */
+  const overlay = document.getElementById('fo')
+  overlay.addEventListener('dragover', ev => { ev.preventDefault(); overlay.classList.add('dropping') })
+  overlay.addEventListener('dragleave', () => overlay.classList.remove('dropping'))
+  overlay.addEventListener('drop', ev => {
+    ev.preventDefault()
+    overlay.classList.remove('dropping')
+    addImages([...ev.dataTransfer.files])
+  })
+
+  bindToolbar()
+  renderMaterials()
+  focusTick()
+}
+
+function onFsChange() {
+  /* 只改标签文字：按钮还有图标那一半。 */
+  const label = document.getElementById('fo-fs-label')
+  if (label) label.textContent = document.fullscreenElement ? '退出全屏' : '屏幕全屏'
+}
+
+function onPaste(ev) {
+  if (focus.id === null) return
+  const files = [...(ev.clipboardData ? ev.clipboardData.items : [])]
+    .filter(item => item.kind === 'file' && item.type.startsWith('image/'))
+    .map(item => item.getAsFile())
+    .filter(Boolean)
+  if (files.length === 0) return
+  ev.preventDefault()
+  addImages(files)
+}
+
+/* 粘贴与全屏状态：挂一次，常驻（focus.id 为空时自己让路）。 */
+document.addEventListener('paste', onPaste)
+document.addEventListener('fullscreenchange', onFsChange)
+
+document.addEventListener('keydown', ev => {
+  if (ev.key !== 'Escape') return
+  if (focus.id === null) return
+  /* 原生全屏时第一次 Esc 由浏览器消费（退出全屏），别把专注层一起关了。 */
+  if (document.fullscreenElement) return
+  closeFocus()
+})
+
+/* ---- 工具条：进度 + 退出 ---------------------------------------------- */
+function bindToolbar() {
+  const e = ENTRIES[focus.id]
+  const bar = document.getElementById('fo-bar')
+  const toggle = document.getElementById('fo-toggle')
+  if (toggle) toggle.onclick = () => { e.current = e.current > 0 ? 0 : 1; repaintChrome() }
+  document.querySelectorAll('[data-nudge]').forEach(btn => {
+    btn.onclick = () => {
+      e.current = Math.max(0, Math.min(e.total, e.current + Number(btn.dataset.nudge)))
+      repaintChrome()
+    }
+  })
+  document.querySelectorAll('.cp-chip').forEach(chip => {
+    chip.onclick = () => { e.current = Number(chip.dataset.cp); repaintChrome() }
+  })
+  if (!bar) return
+  let drag = null
+  const ratioFrom = ev => {
+    const box = bar.getBoundingClientRect()
+    return box.width <= 0 ? 0 : Math.max(0, Math.min(1, (ev.clientX - box.left) / box.width))
+  }
+  bar.addEventListener('pointerdown', ev => {
+    bar.setPointerCapture(ev.pointerId)
+    drag = ratioFrom(ev)
+    bar.classList.add('task-bar-active')
+    paintLive(Math.round(drag * e.total))
+  })
+  bar.addEventListener('pointermove', ev => {
+    if (drag === null) return
+    drag = ratioFrom(ev)
+    paintLive(Math.round(drag * e.total))
+  })
+  bar.addEventListener('pointerup', ev => {
+    if (drag === null) return
+    const next = Math.max(0, Math.min(e.total, Math.round(ratioFrom(ev) * e.total)))
+    drag = null
+    bar.classList.remove('task-bar-active')
+    e.current = next
+    repaintChrome()
+  })
+  bar.addEventListener('pointercancel', () => { drag = null; bar.classList.remove('task-bar-active'); repaintChrome() })
+  bar.addEventListener('keydown', ev => {
+    if (ev.key === 'ArrowRight' || ev.key === 'ArrowUp') { ev.preventDefault(); e.current = Math.min(e.total, e.current + 1); repaintChrome() }
+    else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowDown') { ev.preventDefault(); e.current = Math.max(0, e.current - 1); repaintChrome() }
+    else if (ev.key === 'Home') { ev.preventDefault(); e.current = 0; repaintChrome() }
+    else if (ev.key === 'End') { ev.preventDefault(); e.current = e.total; repaintChrome() }
+  })
+}
+function paintLive(value) {
+  const e = ENTRIES[focus.id]
+  const pct = Math.round(Math.min(1, value / e.total) * 100)
+  const bar = document.getElementById('fo-bar')
+  bar.querySelector('.task-fill').style.width = pct + '%'
+  bar.querySelector('.task-thumb').style.left = pct + '%'
+  bar.querySelectorAll('.tick').forEach((tick, i) => tick.classList.toggle('tick-ok', value >= e.checkpoints[i].at))
+  const reading = document.getElementById('fo-reading')
+  reading.innerHTML = `<b>${value}</b>/${e.total}`
+}
+/* 只重绘「会随进度变」的外壳：工具条 + 检查点行 + 左列徽章；素材与笔记不动。 */
+function repaintChrome() {
+  const e = ENTRIES[focus.id]
+  const box = document.getElementById('fo-toolbar-box')
+  const scroll = document.getElementById('fo-materials')
+  const top = scroll.scrollTop
+  box.innerHTML = toolbarHTML(e)
+  scroll.scrollTop = top
+  document.getElementById('fo-info').innerHTML = leftInfoHTML(e)
+  bindToolbar()
+  onFsChange()
+}
+
+/* ---- 素材：materials = Array<Markdown | Image> ----------------------- */
+function saveMds() {
+  store.set('mds:' + focus.id, focus.materials.filter(m => m.kind === 'md').map(m => m.text))
+}
+
+function addImages(files) {
+  const images = files.filter(f => f.type && f.type.startsWith('image/'))
+  const rejected = files.length - images.length
+  if (rejected > 0) toast(`${rejected} 个文件不是图片，已跳过`)
+  for (const file of images) {
+    if (file.size > MAX_IMAGE_BYTES) { toast(`「${file.name}」超过 10 MB，已拒绝`); continue }
+    const reader = new FileReader()
+    reader.onload = () => {
+      focus.materials.push({ kind: 'image', url: reader.result, bytes: file.size, name: file.name })
+      renderMaterials()
+    }
+    reader.readAsDataURL(file)
+  }
+}
+
+function renderMaterials() {
+  const list = document.getElementById('fo-mat-list')
+  if (!list) return
+  list.innerHTML = focus.materials.map((m, i) => (m.kind === 'md' ? mdHTML(m, i) : imageHTML(m, i))).join('')
+  const mdCount = focus.materials.filter(m => m.kind === 'md').length
+  const imgBytes = focus.materials.filter(m => m.kind === 'image').reduce((a, b) => a + b.bytes, 0)
+  const imgCount = focus.materials.length - mdCount
+  document.getElementById('fo-mat-meta').textContent =
+    focus.materials.length === 0 ? '空' : `${mdCount} 文本 · ${imgCount} 图${imgCount ? ' · ' + fmtBytes(imgBytes) : ''}`
+
+  list.querySelectorAll('[data-md-edit]').forEach(btn => {
+    btn.onclick = () => {
+      const i = Number(btn.dataset.mdEdit)
+      focus.materials[i].editing = true
+      renderMaterials()
+      const ta = document.querySelector(`[data-md-ta="${i}"]`)
+      if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length) }
+    }
+  })
+  list.querySelectorAll('[data-md-done]').forEach(btn => {
+    btn.onclick = () => { focus.materials[Number(btn.dataset.mdDone)].editing = false; renderMaterials() }
+  })
+  list.querySelectorAll('[data-md-del]').forEach(btn => {
+    btn.onclick = () => { focus.materials.splice(Number(btn.dataset.mdDel), 1); saveMds(); renderMaterials() }
+  })
+  list.querySelectorAll('[data-md-ta]').forEach(ta => {
+    const i = Number(ta.dataset.mdTa)
+    ta.addEventListener('input', () => {
+      focus.materials[i].text = ta.value
+      clearTimeout(focus.mdTimers[i])
+      focus.mdTimers[i] = setTimeout(saveMds, 800)
+    })
+  })
+  list.querySelectorAll('.fo-img').forEach(imgEl => {
+    imgEl.onclick = () => {
+      const full = imgEl.classList.toggle('fo-img-full')
+      const wrap = imgEl.parentElement
+      const del = wrap.querySelector('.fo-img-del')
+      if (full) {
+        const scroller = document.createElement('div')
+        scroller.className = 'fo-img-scroller'
+        imgEl.after(scroller)
+        scroller.append(imgEl, del)
+      } else {
+        const scroller = imgEl.parentElement
+        wrap.append(imgEl, del)
+        scroller.remove()
+      }
+    }
+  })
+  list.querySelectorAll('.fo-img-del').forEach(btn => {
+    btn.onclick = ev => { ev.stopPropagation(); focus.materials.splice(Number(btn.dataset.del), 1); renderMaterials() }
+  })
+}
+
+function mdHTML(m, i) {
+  return `
+    <div class="fo-md">
+      <div class="fo-md-head">
+        <span class="badge">文本 · Markdown</span>
+        ${m.editing
+          ? '<button class="pt-ghost" data-md-done="' + i + '" style="padding:1px 8px">完成编辑</button>'
+          : '<button class="pt-ghost" data-md-edit="' + i + '" style="padding:1px 8px">编辑</button>'}
+        <span class="pt-grow"></span>
+        <button class="pt-icon" data-md-del="${i}" title="删除这块">×</button>
+      </div>
+      ${m.editing
+        ? `<textarea class="fo-md-edit" data-md-ta="${i}" placeholder="Markdown">${esc(m.text)}</textarea>`
+        : `<div class="md-body">${renderMarkdown(m.text)}</div>`}
+    </div>`
+}
+
+function imageHTML(m, i) {
+  return `
+    <div class="fo-img-wrap">
+      <img class="fo-img" src="${m.url}" alt="${esc(m.name || '素材图')}" title="查看原始尺寸">
+      <button class="fo-img-del" title="删除这张" data-del="${i}">×</button>
+    </div>`
+}
+
+/* 生成一张可滚动的示例长图（画布 720×2600），免找图就能试「长图上下滑动」。 */
+function sampleLongImage() {
+  const canvas = document.createElement('canvas')
+  canvas.width = 720
+  canvas.height = 2600
+  const ctx = canvas.getContext('2d')
+  ctx.fillStyle = '#fbfaf7'
+  ctx.fillRect(0, 0, 720, 2600)
+  ctx.strokeStyle = 'rgba(90,120,160,.55)'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.moveTo(56, 120)
+  ctx.lineTo(664, 120)
+  ctx.stroke()
+  ctx.fillStyle = '#2b3a4a'
+  ctx.font = '600 30px system-ui, sans-serif'
+  ctx.fillText('示例长图 · 讲义第 3 章节选', 56, 92)
+  ctx.font = '16px system-ui, sans-serif'
+  for (let y = 170; y < 2600 - 60; y += 46) {
+    ctx.fillStyle = 'rgba(43,58,74,.78)'
+    ctx.fillText('这里是长图的正文行 —— 上下滚动阅读，点击图片可切到原始尺寸。', 56, y)
+  }
+  ctx.strokeStyle = 'rgba(127,127,127,.25)'
+  ctx.lineWidth = 1
+  for (let y = 190; y < 2600 - 60; y += 46) {
+    ctx.beginPath()
+    ctx.moveTo(56, y + 10)
+    ctx.lineTo(664, y + 10)
+    ctx.stroke()
+  }
+  return canvas.toDataURL('image/png')
+}
+
+/* 页面卸载：尽力闭合专注会话（真实实现由宿主 start/end 端点兜底） */
+window.addEventListener('beforeunload', () => {
+  if (focus.id === null) return
+  const sessions = store.get('sessions:' + focus.id, [])
+  const last = sessions[sessions.length - 1]
+  if (last && last.e === 0) { last.e = Date.now(); store.set('sessions:' + focus.id, sessions) }
+})
+
+renderPage()
+</script>
+</body>
+</html>

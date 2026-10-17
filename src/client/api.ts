@@ -12,6 +12,7 @@ import type {
   ImportMode,
   ImportResult,
   MediaEntry,
+  RegistryKind,
   StateView,
   StatsView,
   TaskEntry,
@@ -96,6 +97,28 @@ export interface HabitClient {
   addTask(input: TaskInput): Promise<TaskResult>
   patchTask(id: string, patch: TaskPatch): Promise<TaskResult>
   removeTask(id: string): Promise<TaskResult>
+  /**
+   * Where an `<img src>` points for one stored image.
+   *
+   * The one client method that is not a request: image bytes never travel in a
+   * state slice, so the browser's own image pipeline fetches and caches them by
+   * URL.
+   */
+  assetUrl(assetId: string): string
+  /** Store an image and append it to an entry's materials. */
+  addImageMaterial(owner: RegistryKind, id: string, image: ImageInput): Promise<EntryResult>
+  /** Append a Markdown text block to an entry's materials. */
+  addTextMaterial(owner: RegistryKind, id: string, text: string): Promise<EntryResult>
+  /** Rewrite one Markdown block's text. */
+  patchTextMaterial(owner: RegistryKind, id: string, materialId: string, text: string): Promise<EntryResult>
+  /** Remove one material; an image takes its stored bytes with it. */
+  removeMaterial(owner: RegistryKind, id: string, materialId: string): Promise<EntryResult>
+  /** Delete every stored image nothing references. */
+  sweepAssets(): Promise<SweepResult>
+  /** Open a focus session; a session a crash left open is dropped first. */
+  startFocus(owner: RegistryKind, id: string): Promise<FocusStartResult>
+  /** Close one focus session; an already-closed one is left alone. */
+  endFocus(owner: RegistryKind, id: string, sessionId: string): Promise<EntryResult>
   /** Range aggregates, computed on the host. */
   stats(from: string, to: string): Promise<StatsView>
   /** The whole domain as one portable document. */
@@ -162,6 +185,32 @@ export interface TaskResult {
   readonly ok: true
   readonly tasks: readonly TaskEntry[]
   readonly entry?: TaskEntry
+}
+
+/** What a material or focus call answers with: the entry it changed. */
+export interface EntryResult {
+  readonly ok: true
+  readonly entry: TaskEntry | MediaEntry
+}
+
+/** What opening a focus session answers with. */
+export interface FocusStartResult extends EntryResult {
+  /** The session just opened, so the caller can close exactly that one. */
+  readonly sessionId: string
+}
+
+/** What an orphan sweep answers with. */
+export interface SweepResult {
+  readonly ok: true
+  readonly removed: number
+}
+
+/** One image on its way into the store. */
+export interface ImageInput {
+  readonly mime: string
+  /** Base64 payload; the browser half encodes before it sends. */
+  readonly data: string
+  readonly name?: string
 }
 
 /** A JSON request body, with the verb taken from the route table. */
@@ -279,6 +328,34 @@ export function createHabitClient(options: HabitClientOptions = {}): HabitClient
     addTask: input => request<TaskResult>(url('addTask'), body('addTask', input)),
     patchTask: (id, patch) => request<TaskResult>(url('patchTask'), body('patchTask', { id, patch })),
     removeTask: id => request<TaskResult>(url('removeTask', { id }), { method: routes.removeTask.method }),
+    assetUrl: assetId => url('asset', { id: assetId }),
+    addImageMaterial: (owner, id, image) => request<EntryResult>(url('addAsset'), body('addAsset', {
+      kind: owner,
+      id,
+      mime: image.mime,
+      data: image.data,
+      ...(image.name === undefined ? {} : { name: image.name }),
+    })),
+    addTextMaterial: (owner, id, text) =>
+      request<EntryResult>(url('addMaterial'), body('addMaterial', { kind: owner, id, text })),
+    patchTextMaterial: (owner, id, materialId, text) =>
+      request<EntryResult>(url('patchMaterial'), body('patchMaterial', { kind: owner, id, materialId, text })),
+    removeMaterial: (owner, id, materialId) => request<EntryResult>(
+      url('removeMaterial', { kind: owner, id, materialId }),
+      { method: routes.removeMaterial.method },
+    ),
+    sweepAssets: async () => {
+      const value = await request<SweepResult>(url('sweepAssets'), { method: routes.sweepAssets.method })
+      if (typeof value.removed !== 'number') staleHost()
+      return value
+    },
+    startFocus: async (owner, id) => {
+      const value = await request<FocusStartResult>(url('focusStart'), body('focusStart', { kind: owner, id }))
+      if (typeof value.sessionId !== 'string') staleHost()
+      return value
+    },
+    endFocus: (owner, id, sessionId) =>
+      request<EntryResult>(url('focusEnd'), body('focusEnd', { kind: owner, id, sessionId })),
     stats: (from, to) => request<StatsView>(url('stats', { from, to })),
     exportAll: async () => {
       const value = await request<{ ok: true; backup: BackupBundle }>(url('exportBackup'))

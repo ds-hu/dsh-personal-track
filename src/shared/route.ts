@@ -16,6 +16,17 @@
 /** The path prefix this plugin owns on the GUI host. */
 export const API_PREFIX = '/habit/api'
 
+/**
+ * The largest image either half will move, in raw bytes.
+ *
+ * The one wire constant besides the paths, and it lives here for the same
+ * reason they do: the browser half refuses an oversized paste before it spends
+ * the upload, and the host refuses it again at the boundary. Two copies of this
+ * number would drift, and the drift would show up as an image that the picker
+ * accepted and the store rejected.
+ */
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+
 /** The verbs this API uses. */
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
@@ -66,6 +77,19 @@ export const routes = {
   addTask: { method: 'POST', request: '/tasks' },
   patchTask: { method: 'PATCH', request: '/tasks' },
   removeTask: { method: 'DELETE', request: '/tasks' },
+  /**
+   * The one route that answers with bytes rather than JSON: `<img src>` points
+   * straight at it, so a long screenshot is decoded by the browser's image
+   * pipeline and cached by URL instead of travelling through every state slice.
+   */
+  asset: { method: 'GET', request: '/asset' },
+  addAsset: { method: 'POST', request: '/asset' },
+  sweepAssets: { method: 'POST', request: '/asset/sweep' },
+  addMaterial: { method: 'POST', request: '/material' },
+  patchMaterial: { method: 'PATCH', request: '/material' },
+  removeMaterial: { method: 'DELETE', request: '/material' },
+  focusStart: { method: 'POST', request: '/focus' },
+  focusEnd: { method: 'PATCH', request: '/focus' },
 } as const satisfies Record<string, RouteEntry>
 
 /** The identifier of one declared route. */

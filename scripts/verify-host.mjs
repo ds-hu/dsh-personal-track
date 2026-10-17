@@ -16,7 +16,7 @@
  * sandbox grants no writes to the platform temp directory.
  */
 import { strict as assert } from 'node:assert'
-import { mkdir, readFile, rm } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import Storage from '@deepseek-ai/dsh-storage'
@@ -75,6 +75,20 @@ async function mount(root = ROOT) {
         }),
       })
       return { status: response.status, body: await response.json() }
+    },
+    /**
+     * One request whose response is bytes rather than JSON.
+     *
+     * The asset route is the only one, and it cannot go through `call`: asking
+     * a PNG for `.json()` is the bug this helper exists to avoid.
+     */
+    async raw(method, path) {
+      const response = await fetch(`${base}${path}`, { method })
+      return {
+        status: response.status,
+        contentType: response.headers.get('content-type'),
+        bytes: Buffer.from(await response.arrayBuffer()),
+      }
     },
     async stop() {
       await app.dispose()
@@ -338,12 +352,76 @@ assert.deepEqual(next.body.day.target, { new: 10, review: 5 }, 'a new day inheri
 assert.equal(next.body.day.day, null, 'inheriting does not create a document')
 console.log('carry-forward ✓  (inherited target, still no document)')
 
+// --- materials, images and focus sessions ------------------------------------
+// The image is the subject of the rest of this file: it has to survive the
+// restart, land on disk as its own document, and come back through a backup
+// into a root that never saw it.
+const TINY_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+const withImage = await api.call('POST', '/asset', {
+  kind: 'task', id: lateId, mime: 'image/png', data: TINY_PNG, name: '讲义.png',
+})
+assert.equal(withImage.status, 200)
+const imageMaterial = withImage.body.entry.materials[0]
+assert.equal(imageMaterial.kind, 'image')
+assert.equal(imageMaterial.mime, 'image/png', 'mime is derived from the asset document')
+assert.equal(imageMaterial.bytes, Buffer.from(TINY_PNG, 'base64').length, 'and so is its size')
+
+const fetched = await api.raw('GET', `/asset?id=${imageMaterial.assetId}`)
+assert.equal(fetched.status, 200)
+assert.equal(fetched.contentType, 'image/png', 'the bytes come back with their stored mime')
+assert.deepEqual(fetched.bytes, Buffer.from(TINY_PNG, 'base64'), 'and they are the bytes that were sent')
+
+const withText = await api.call('POST', '/material', { kind: 'task', id: lateId, text: '## 要点\n- 一条' })
+const textMaterial = withText.body.entry.materials.find(material => material.kind === 'md')
+assert.equal(textMaterial.text, '## 要点\n- 一条', 'text and images share one ordered stream')
+assert.equal(withText.body.entry.materials.length, 2)
+
+const focused = await api.call('POST', '/focus', { kind: 'task', id: lateId })
+assert.equal(typeof focused.body.sessionId, 'string', 'the opened session is named back')
+assert.equal(focused.body.entry.focusSessions.length, 1)
+const closed = await api.call('PATCH', '/focus', {
+  kind: 'task', id: lateId, sessionId: focused.body.sessionId,
+})
+assert.equal(typeof closed.body.entry.focusSessions[0].endedAt, 'string', 'closing stamps the end')
+assert.equal(closed.body.entry.focusSeconds, 0, 'the pinned clock makes the session zero-length')
+console.log('materials + focus ✓  (image bytes over their own route, one ordered stream, instants only)')
+
+// --- a version 1 document is still read --------------------------------------
+// The domain moved to version 2 (assets, materials, focusSessions). A
+// `per-record` backend *discards* a document stamped with a version it does not
+// accept — so this writes one by hand, exactly as the previous build left it,
+// and proves `compatibleVersions` is what keeps a year of habit days alive.
+const LEGACY_ROOT = join('.tmp', 'verify-host-legacy')
+await rm(LEGACY_ROOT, { recursive: true, force: true })
+await mkdir(join(LEGACY_ROOT, 'habit', 'days'), { recursive: true })
+await writeFile(
+  join(LEGACY_ROOT, 'habit', 'days', `${DATE}.json`),
+  JSON.stringify({ version: 1, record: { date: DATE, washes: { times: ['2026-09-16T07:00:00.000Z'] } } }),
+  'utf8',
+)
+const legacy = await mount(LEGACY_ROOT)
+const legacyDay = await legacy.call('GET', `/state?date=${DATE}`)
+assert.equal(legacyDay.status, 200)
+assert.equal(legacyDay.body.day.day.washes.times.length, 1, 'a version 1 document is read, not discarded')
+assert.deepEqual(legacyDay.body.day.progress, { done: 1, total: 8 }, 'and every derived value is recomputed')
+assert.equal(legacyDay.body.tasks.length, 0, 'its records read as having no materials, not as broken')
+await legacy.stop()
+await rm(LEGACY_ROOT, { recursive: true, force: true })
+console.log('legacy data ✓  (a version 1 document survives the version 2 schema)')
+
 // --- on-disk shape -----------------------------------------------------------
 const dayFile = join(ROOT, 'habit', 'days', `${DATE}.json`)
 const stored = JSON.parse(await readFile(dayFile, 'utf8'))
-assert.equal(stored.version, 1)
+assert.equal(stored.version, 2, 'records are stamped with the current domain version')
 assert.equal(stored.record.date, DATE)
 assert.equal(stored.record.washing.length, 1)
+
+// The image is its own document, and its size is nowhere in it.
+const assetFile = JSON.parse(await readFile(join(ROOT, 'habit', 'assets', `${imageMaterial.assetId}.json`), 'utf8'))
+assert.equal(assetFile.version, 2)
+assert.equal(assetFile.record.mime, 'image/png')
+assert.equal(assetFile.record.data, TINY_PNG, 'the bytes are the only thing stored about an image')
+assert.equal('bytes' in assetFile.record, false, 'a size would be a second copy of the same fact')
 let untouchedExists = true
 try {
   await readFile(join(ROOT, 'habit', 'days', '2026-09-17.json'), 'utf8')
@@ -366,8 +444,14 @@ assert.equal(
   reloaded.body.tasks.find(entry => entry.id === lateId).state, 'done',
   'and their derived state is recomputed on read',
 )
+const reloadedTask = reloaded.body.tasks.find(entry => entry.id === lateId)
+assert.equal(reloadedTask.materials.length, 2, 'materials survive a restart')
+assert.equal(reloadedTask.focusSessions.length, 1, 'and so do focus sessions')
+const afterRestart = await restarted.raw('GET', `/asset?id=${imageMaterial.assetId}`)
+assert.deepEqual(afterRestart.bytes, Buffer.from(TINY_PNG, 'base64'), 'the image is still served after a restart')
+assert.equal(afterRestart.contentType, 'image/png')
 await restarted.stop()
-console.log('restart ✓  (everything re-read from the medium)')
+console.log('restart ✓  (everything re-read from the medium, images included)')
 
 // --- backup: export, then restore the file into a fresh root ------------------
 const BACKUP_ROOT = join('.tmp', 'verify-host-backup')
@@ -377,17 +461,23 @@ await mkdir(BACKUP_ROOT, { recursive: true })
 const source = await mount()
 const backup = (await source.call('GET', '/backup')).body.backup
 assert.equal(backup.format, 'personal-track/backup')
-assert.equal(backup.version, 1)
+assert.equal(backup.version, 2)
 assert.equal(backup.days.length, 1, 'the saved day is in the backup')
 assert.equal(backup.days[0].date, DATE)
 assert.equal(backup.tasks.length, 2)
 assert.equal(backup.media.length, 0, 'the hard-deleted book is not in the backup')
 assert.equal(backup.counters.laundry.pending, 2, 'the laundry stock travels with the file')
+assert.equal(backup.assets.length, 1, 'and so do the material images')
+assert.equal(backup.assets[0].data, TINY_PNG, 'as bytes, since they are the fact')
 // The file holds facts only — the derived-state rule reaches the file format.
 assert.equal('cells' in backup.days[0], false, 'no derived cell list in a backup')
 assert.equal('progress' in backup.days[0], false, 'no derived progress in a backup')
 assert.equal(backup.days[0].vocab.ratio, undefined, 'no weighted ratio in a backup')
 assert.equal(backup.tasks[0].state, undefined, 'task state is derived, never stored')
+assert.equal(
+  backup.tasks.find(task => task.id === lateId).focusSeconds, undefined,
+  'focus time is derived from the sessions, never stored',
+)
 await source.stop()
 
 // Restoring into an empty root proves the file alone rebuilds the state.
@@ -395,6 +485,7 @@ const restored = await mount(BACKUP_ROOT)
 const applied = await restored.call('POST', '/backup', { mode: 'replace', backup })
 assert.equal(applied.status, 200)
 assert.equal(applied.body.report.days, 1)
+assert.equal(applied.body.report.assets, 1, 'the image travelled with the file')
 assert.equal(applied.body.report.removed, 0, 'an empty root had nothing to replace')
 assert.equal(applied.body.stock.pending, 2, 'the imported stock is live')
 const restoredDay = (await restored.call('GET', `/state?date=${DATE}`)).body
@@ -403,6 +494,15 @@ assert.equal(restoredDay.day.progress.done, 4, 'every cell is recomputed from th
 assert.equal(restoredDay.day.vocab.ratio, 0, 'progress is recomputed, not read from the file')
 assert.deepEqual(restoredDay.day.target, { new: 10, review: 5 }, 'the target snapshot survives')
 assert.equal(restoredDay.tasks.find(task => task.id === lateId)?.state, 'done', 'derived task state comes back')
+
+// The image's bytes came back with the file: a material is only a reference,
+// so a restore that lost them would have to say so rather than draw nothing.
+const restoredImage = await restored.raw('GET', `/asset?id=${imageMaterial.assetId}`)
+assert.equal(restoredImage.status, 200, 'the restored image is served')
+assert.deepEqual(restoredImage.bytes, Buffer.from(TINY_PNG, 'base64'), 'byte for byte')
+const restoredTask = (await restored.call('GET', `/state?date=${DATE}`)).body.tasks.find(task => task.id === lateId)
+assert.equal(restoredTask.materials.length, 2, 'both materials came back, in order')
+assert.equal(restoredTask.materials[0].bytes, Buffer.from(TINY_PNG, 'base64').length, 'with their size derived again')
 
 // A restored day is a normal day: it takes new records and reports them.
 await restored.call('PUT', '/meal', { date: DATE, slot: 'breakfast', price: 3.5 })
@@ -434,6 +534,30 @@ assert.equal((await restored.call('GET', `/state?date=${DATE}`)).body.tasks.leng
 const badVersion = await restored.call('POST', '/backup', { mode: 'merge', backup: { ...backup, version: 99 } })
 assert.equal(badVersion.status, 400)
 assert.match(badVersion.body.error.message, /版本/)
+
+// A version 1 file is still readable. What makes one is not only the number:
+// the previous build had no materials and no assets, so the records carry
+// neither — a file with image materials and no bytes is refused just below.
+const legacyBackup = {
+  ...backup,
+  version: 1,
+  assets: [],
+  media: backup.media.map(({ materials, focusSessions, ...rest }) => rest),
+  tasks: backup.tasks.map(({ materials, focusSessions, ...rest }) => rest),
+}
+const fromLegacy = await restored.call('POST', '/backup', { mode: 'merge', backup: legacyBackup })
+assert.equal(fromLegacy.status, 200, 'a version 1 file is accepted')
+assert.equal(fromLegacy.body.report.assets, 0, 'and reports no images, because it carries none')
+
+// A material is a reference; a file whose bytes are missing is refused whole
+// rather than silently imported as an entry with a broken picture.
+const dangling = await restored.call('POST', '/backup', {
+  mode: 'merge',
+  backup: { ...backup, assets: [] },
+})
+assert.equal(dangling.status, 400, 'an image material with no bytes fails the whole file')
+assert.equal(dangling.body.error.code, 'habit/bad-backup')
+assert.match(dangling.body.error.message, /图片素材缺少对应数据/)
 
 // An import really replaces the counter table when the file omits it.
 const noCounter = await restored.call('POST', '/backup', { mode: 'replace', backup: { ...backup, counters: {} } })

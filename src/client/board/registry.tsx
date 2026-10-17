@@ -51,7 +51,9 @@ const MEDIA_FIELDS: readonly FieldSpec[] = [
     ],
   },
   { name: 'rating', label: '评分', kind: 'number', min: 1, max: 5, optional: true, placeholder: '1-5' },
-  { name: 'notes', label: '备注', kind: 'text', optional: true },
+  // The same field focus mode edits at length, so the board must not be the
+  // place a long note gets flattened into one line.
+  { name: 'notes', label: '备注', kind: 'textarea', optional: true, wide: true },
 ]
 
 /** Fields a task exposes (progress is flattened for the form). */
@@ -62,7 +64,7 @@ const TASK_FIELDS: readonly FieldSpec[] = [
   { name: 'current', label: '当前', kind: 'number', min: 0, optional: true },
   { name: 'total', label: '目标量', kind: 'number', min: 1, optional: true },
   { name: 'checkpoints', label: '检查点', kind: 'textarea', optional: true, placeholder: '每行一个：第一章@10', wide: true },
-  { name: 'notes', label: '备注', kind: 'text', optional: true },
+  { name: 'notes', label: '备注', kind: 'textarea', optional: true, wide: true },
 ]
 
 /**
@@ -169,6 +171,8 @@ export interface MediaTileProps {
   readonly onAdd: (input: MediaInput) => void
   readonly onPatch: (id: string, patch: MediaPatch) => void
   readonly onRemove: (id: string) => void
+  /** Opens one entry in focus mode. */
+  readonly onFocus: (entry: MediaEntry) => void
 }
 
 /**
@@ -183,7 +187,7 @@ function isSettled(entry: MediaEntry): boolean {
 }
 
 /** What has been watched and read: a log, written after the fact. */
-export function MediaTile({ media, busy, onAdd, onPatch, onRemove }: MediaTileProps): JSX.Element {
+export function MediaTile({ media, busy, onAdd, onPatch, onRemove, onFocus }: MediaTileProps): JSX.Element {
   const [mode, dispatch] = useEditor(media.map(entry => entry.id))
   const live = media.filter(entry => !isSettled(entry))
   const settled = media.filter(isSettled)
@@ -213,7 +217,7 @@ export function MediaTile({ media, busy, onAdd, onPatch, onRemove }: MediaTilePr
     )
     : (
       <div className="pt-list-row" key={entry.id}>
-        <span className="pt-list-text">
+        <span className="pt-list-text pt-row-open" title="进入专注模式" onClick={() => onFocus(entry)}>
           <span className={entry.status === 'done' ? 'pt-badge pt-badge-ok' : 'pt-badge'}>
             {entry.kind === 'film' ? '影' : '书'}
           </span>
@@ -222,6 +226,7 @@ export function MediaTile({ media, busy, onAdd, onPatch, onRemove }: MediaTilePr
           {entry.rating === undefined ? null : <span className="pt-muted"> ★{entry.rating}</span>}
           <span className="pt-muted"> · {mediaStatusLabel(entry.status)}</span>
         </span>
+        <IconButton label="专注" disabled={busy} onClick={() => onFocus(entry)}>⤢</IconButton>
         <IconButton label="编辑" disabled={busy} onClick={() => dispatch({ kind: 'edit', id: entry.id })}>✎</IconButton>
         <IconButton label="删除" disabled={busy} onClick={() => onRemove(entry.id)}>×</IconButton>
       </div>
@@ -276,6 +281,8 @@ export interface TaskTileProps {
   readonly onAdd: (input: TaskInput) => void
   readonly onPatch: (id: string, patch: TaskPatch) => void
   readonly onRemove: (id: string) => void
+  /** Opens one entry in focus mode. */
+  readonly onFocus: (entry: TaskEntry) => void
 }
 
 /** The deadline as the row shows it: "今天" when it is, else `MM-DD`. */
@@ -349,13 +356,14 @@ function barTitle(entry: TaskEntry, dragging: boolean): string {
  * the preview — the thumb and the reading beside the bar follow it live — and
  * `progress.current` stays the accepted truth until then.
  */
-function TaskRow({ entry, today, busy, onPatch, onEdit, onRemove }: {
+function TaskRow({ entry, today, busy, onPatch, onEdit, onRemove, onFocus }: {
   readonly entry: TaskEntry
   readonly today: string
   readonly busy: boolean
   readonly onPatch: (patch: TaskPatch) => void
   readonly onEdit: () => void
   readonly onRemove: () => void
+  readonly onFocus: () => void
 }): JSX.Element {
   const [drag, setDrag] = useState<number | null>(null)
   const total = entry.progress.total
@@ -380,7 +388,7 @@ function TaskRow({ entry, today, busy, onPatch, onEdit, onRemove }: {
   return (
     <div className={entry.overdue && entry.state !== 'done' ? 'pt-task pt-task-late' : 'pt-task'}>
       <div className="pt-task-head">
-        <span className="pt-task-title">{entry.title}</span>
+        <span className="pt-task-title pt-row-open" title="进入专注模式" onClick={onFocus}>{entry.title}</span>
         {entry.category === undefined ? null : <span className="pt-muted">({entry.category})</span>}
         {entry.due === undefined
           ? null
@@ -470,6 +478,7 @@ function TaskRow({ entry, today, busy, onPatch, onEdit, onRemove }: {
           )
           : null}
         {entry.state === 'done' ? <span className="pt-task-ok" title="已完成">✓</span> : null}
+        <IconButton label="专注" disabled={busy} onClick={onFocus}>⤢</IconButton>
         <IconButton label="编辑" disabled={busy} onClick={onEdit}>✎</IconButton>
         <IconButton label="删除" disabled={busy} onClick={onRemove}>×</IconButton>
       </div>
@@ -495,7 +504,7 @@ function isArchived(task: TaskEntry, today: string): boolean {
  * order itself belongs to `./task-order.ts`, because the daily report reads the
  * registry in it too.
  */
-export function TaskTile({ tasks, today, busy, onAdd, onPatch, onRemove }: TaskTileProps): JSX.Element {
+export function TaskTile({ tasks, today, busy, onAdd, onPatch, onRemove, onFocus }: TaskTileProps): JSX.Element {
   const [mode, dispatch] = useEditor(tasks.map(task => task.id))
   const open = tasks.filter(task => task.state !== 'done').length
   const overdue = tasks.filter(task => task.overdue).length
@@ -538,6 +547,7 @@ export function TaskTile({ tasks, today, busy, onAdd, onPatch, onRemove }: TaskT
         onPatch={patch => onPatch(task.id, patch)}
         onEdit={() => dispatch({ kind: 'edit', id: task.id })}
         onRemove={() => onRemove(task.id)}
+        onFocus={() => onFocus(task)}
       />
     ))
 

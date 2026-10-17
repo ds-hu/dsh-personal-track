@@ -16,7 +16,7 @@ import { ApiError } from './api-error.ts'
 import type { Backup } from './backup.ts'
 import type { Config, DayBoundary } from './config.ts'
 import { habitDayKey, instantForHabitDay, type DayKey } from './daykey.ts'
-import { BACKUP_BODY_LIMIT, handlers, type RouteCtx } from './routes.ts'
+import { BACKUP_BODY_LIMIT, ASSET_BODY_LIMIT, MATERIAL_BODY_LIMIT, handlers, type BinaryResult, type RouteCtx } from './routes.ts'
 import type { HabitStore } from './store.ts'
 import { API_PREFIX, routes, type RouteName } from '../shared/route.ts'
 
@@ -41,7 +41,8 @@ export interface HabitRequest {
 /** The response half of the transport: write a status and a body, nothing more. */
 export interface HabitResponse {
   writeHead(status: number, headers: Record<string, string>): unknown
-  end(body?: string): unknown
+  /** A string for JSON, a `Buffer` for the one route that answers with bytes. */
+  end(body?: string | Buffer): unknown
 }
 
 /** The handler shape this module produces. */
@@ -59,12 +60,44 @@ export interface ApiDeps {
 /** A backup file is far larger than an ordinary mutation body. */
 const BODY_LIMIT = 64 * 1024
 
+/**
+ * Routes whose body legitimately dwarfs a mutation.
+ *
+ * A single limit for everything would either be too small for one image or
+ * absurdly generous for a check-in; naming the exceptions keeps the ordinary
+ * path's guard as tight as it was.
+ */
+const BODY_LIMITS: Partial<Record<RouteName, number>> = {
+  importBackup: BACKUP_BODY_LIMIT,
+  addAsset: ASSET_BODY_LIMIT,
+  addMaterial: MATERIAL_BODY_LIMIT,
+  patchMaterial: MATERIAL_BODY_LIMIT,
+}
+
 const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD')
 
 /** Write one JSON response. */
 function sendJson(res: HabitResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
   res.end(JSON.stringify(body))
+}
+
+/**
+ * Write one byte response.
+ *
+ * Base64 is decoded here rather than in the handler because *serialization* is
+ * this module's job — the handler answers with a payload, the transport decides
+ * how a payload becomes a response. Long-lived caching is safe because an
+ * asset's id is its content: a material never points at different bytes.
+ */
+function sendBinary(res: HabitResponse, status: number, result: BinaryResult): void {
+  const { contentType, base64, cacheSeconds } = result.binary
+  res.writeHead(status, {
+    'content-type': contentType,
+    'content-length': String(Buffer.from(base64, 'base64').length),
+    'cache-control': `private, max-age=${cacheSeconds}, immutable`,
+  })
+  res.end(Buffer.from(base64, 'base64'))
 }
 
 /** Read and parse a JSON body, bounded in size. */
@@ -201,14 +234,21 @@ export function createApiHandler(deps: ApiDeps): HabitHandler {
       const method = (req.method ?? 'GET') as Method
       const path = url.pathname.slice(API_PREFIX.length) || '/'
       const name = routeFor(method, path)
-      // A backup import is the one body that legitimately dwarfs a mutation.
-      const limit = name === 'importBackup' ? BACKUP_BODY_LIMIT : BODY_LIMIT
+      // Most bodies are small; the exceptions are named in one table.
+      const limit = BODY_LIMITS[name] ?? BODY_LIMIT
       // Read unconditionally: `readJson` answers `{}` for an empty stream, and
       // deleting a check is addressed by its query string, so there is nothing
       // to special-case per verb.
       const body = await readJson(req, limit)
       const query = Object.fromEntries(url.searchParams.entries())
-      sendJson(res, 200, await handlers[name](ctx, body, query))
+      const result = await handlers[name](ctx, body, query)
+      // The one arm that is not JSON. The marker is in the result itself, so
+      // the handler table needs no second dispatch table beside it.
+      if ('binary' in result) {
+        sendBinary(res, 200, result as BinaryResult)
+        return
+      }
+      sendJson(res, 200, result)
     } catch (error) {
       if (error instanceof ApiError) {
         sendJson(res, error.status, { error: { code: error.code, message: error.message } })

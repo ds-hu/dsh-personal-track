@@ -213,6 +213,7 @@ export function StatsPanel({ client }: StatsPanelProps): JSX.Element {
     ['其中逾期完成', `${stats.tasks.doneLate}`],
     ['未完成 / 进行中', `${stats.tasks.open} / ${stats.tasks.doing}`],
     ['当前逾期', `${stats.tasks.overdue}`],
+    ['累计专注', `${Math.round(stats.focus.seconds / 60)} 分（${stats.focus.sessions} 段）`],
   ]
 
   return (

@@ -47,14 +47,14 @@ async function populate(api: Harness): Promise<void> {
 
 // --- the file's shape --------------------------------------------------------
 
-await checkAsync('the bundle carries identity, a version and the four fact tables', async () => {
+await checkAsync('the bundle carries identity, a version and the five fact tables', async () => {
   const api = createHarness()
   await populate(api)
   const bundle = api.backup.exportAll('2026-09-16T21:00:00Z')
   assert.deepEqual(
     Object.keys(bundle).sort(),
-    ['counters', 'days', 'exportedAt', 'format', 'media', 'tasks', 'version'],
-    'no fifth table, and nothing derived alongside them',
+    ['assets', 'counters', 'days', 'exportedAt', 'format', 'media', 'tasks', 'version'],
+    'no sixth table, and nothing derived alongside them',
   )
   assert.equal(bundle.format, BACKUP_FORMAT)
   assert.equal(bundle.version, BACKUP_VERSION)
@@ -77,9 +77,13 @@ await checkAsync('a task exports its record without the states the view derives'
   await populate(api)
   const [task] = api.backup.exportAll('x').tasks
   assert.ok(task)
-  assert.deepEqual(Object.keys(task).sort(), ['category', 'checkpoints', 'completedAt', 'createdAt', 'due', 'id', 'progress', 'title'].sort())
+  assert.deepEqual(
+    Object.keys(task).sort(),
+    ['category', 'checkpoints', 'completedAt', 'createdAt', 'due', 'focusSessions', 'id', 'materials', 'progress', 'title'].sort(),
+  )
   assert.equal('state' in task, false, '待办/进行中/完成 is derived')
   assert.equal('overdue' in task, false, '逾期 is derived')
+  assert.equal('focusSeconds' in task, false, 'focus time is derived from the sessions')
 })
 
 await checkAsync('a vocab session exports no weighted ratio', async () => {
@@ -207,7 +211,7 @@ await checkAsync('merge overwrites the keys the file carries and keeps the rest'
   const api = createHarness()
   await populate(api)
   const report0 = await api.backup.importAll(smallBundle(), 'merge')
-  assert.deepEqual(report0, { mode: 'merge', days: 1, media: 0, tasks: 0, counters: 1, removed: 0 })
+  assert.deepEqual(report0, { mode: 'merge', days: 1, media: 0, tasks: 0, counters: 1, assets: 0, removed: 0 })
 
   const after = api.backup.exportAll('x')
   assert.equal(after.counters.laundry!.pending, 7, 'the counter was overwritten')

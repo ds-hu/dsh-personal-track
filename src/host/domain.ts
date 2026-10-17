@@ -2,10 +2,10 @@
  * The habit storage domain: one schema-validated KV domain named `habit`,
  * laid out `per-record` so each habit day is its own JSON document.
  *
- * Only facts are stored — instants, metrics, entries, and the laundry stock.
- * Every state derived from them (cells, target progress, task state, overdue,
- * pace, streaks) is computed on read; see
- * docs/adr/0002-derived-state-not-stored.md.
+ * Only facts are stored — instants, metrics, entries, material bytes, and the
+ * laundry stock. Every state derived from them (cells, target progress, task
+ * state, overdue, pace, streaks, focus durations, image sizes) is computed on
+ * read; see docs/adr/0002-derived-state-not-stored.md.
  */
 import { z } from 'zod'
 import { defineDomain, domainTable, type Domain } from '@deepseek-ai/dsh-storage-domain'
@@ -116,6 +116,66 @@ export const counterRecord = z.object({
 /** The laundry stock record. */
 export type CounterRecord = z.infer<typeof counterRecord>
 
+/**
+ * One focus session on a registry entry: the fact that someone sat down with
+ * this task or title, from one instant to another.
+ *
+ * Duration is deliberately absent — it is `endedAt − startedAt`, derived on
+ * read like every other derived value (docs/adr/0002-derived-state-not-stored.md).
+ * `endedAt` is missing only while a session is open; a session left open by a
+ * crash is dropped by the next start rather than guessed at.
+ */
+export const focusSession = z.object({
+  id: sessionId,
+  startedAt: z.string(),
+  endedAt: z.string().optional(),
+})
+
+/** One focus session, as stored. */
+export type FocusSession = z.infer<typeof focusSession>
+
+/**
+ * A Markdown text block among a registry entry's materials.
+ *
+ * The text lives here rather than in `notes` because materials are an ordered
+ * stream that text and images share, while `notes` stays the short remark the
+ * board's own form edits.
+ */
+const materialText = z.object({
+  kind: z.literal('md'),
+  id: sessionId,
+  text: z.string(),
+})
+
+/**
+ * A pasted image among a registry entry's materials.
+ *
+ * Only the *reference* is here — the bytes live in the `assets` table, one
+ * document per image, so reading a task never drags megabytes along. Size and
+ * mime are derived from the asset when a view is built, never stored twice.
+ */
+const materialImage = z.object({
+  kind: z.literal('image'),
+  id: sessionId,
+  assetId: sessionId,
+  name: z.string().optional(),
+  createdAt: z.string(),
+})
+
+/** One material: text or image, in the order the user added them. */
+export const material = z.discriminatedUnion('kind', [materialText, materialImage])
+
+/** One material, as stored. */
+export type Material = z.infer<typeof material>
+
+/** Everything a registry entry carries beyond its own shape. */
+const registryExtras = {
+  /** The ordered material stream: Markdown blocks and pasted images. */
+  materials: z.array(material).default([]),
+  /** Focus sessions spent on this entry; duration derived, never stored. */
+  focusSessions: z.array(focusSession).default([]),
+}
+
 /** One media log entry (log-shaped registry). */
 export const mediaRecord = z.object({
   id: sessionId,
@@ -127,6 +187,7 @@ export const mediaRecord = z.object({
   finishedAt: z.string().optional(),
   notes: z.string().optional(),
   createdAt: z.string(),
+  ...registryExtras,
 })
 
 /** One media entry. */
@@ -146,6 +207,9 @@ const taskCheckpoint = z.object({
   reachedAt: z.string().optional(),
 })
 
+/** One checkpoint. */
+export type TaskCheckpoint = z.infer<typeof taskCheckpoint>
+
 /** One task (task-shaped registry: title, optional category/due, progress). */
 export const taskRecord = z.object({
   id: sessionId,
@@ -162,24 +226,57 @@ export const taskRecord = z.object({
   completedAt: z.string().optional(),
   notes: z.string().optional(),
   createdAt: z.string(),
+  ...registryExtras,
 })
 
 /** One task. */
 export type TaskRecord = z.infer<typeof taskRecord>
 
-/** One checkpoint. */
-export type TaskCheckpoint = z.infer<typeof taskCheckpoint>
+/** Either kind of registry entry, as stored. */
+export type RegistryRecord = MediaRecord | TaskRecord
 
-/** The domain declaration: identity, layout and record schemas. */
+/**
+ * One stored image: the only place material bytes live.
+ *
+ * Base64 inside a per-record JSON document, which is what keeps images inside
+ * the domain's own schema validation, per-record layout and backup round-trip
+ * (docs/adr/0003-assets-in-domain-as-base64.md). There is no owner field: the
+ * entry that references this id through `materialImage.assetId` *is* the owner,
+ * so cascade delete and the orphan sweep read that reference instead of
+ * maintaining a second, driftable copy of the relationship.
+ */
+export const assetRecord = z.object({
+  id: sessionId,
+  mime: z.string().min(1),
+  /** Base64 payload. Its size is derived from this, never stored beside it. */
+  data: z.string().min(1),
+  createdAt: z.string(),
+})
+
+/** One stored image. */
+export type AssetRecord = z.infer<typeof assetRecord>
+
+/**
+ * The domain declaration: identity, layout and record schemas.
+ *
+ * `version: 2` adds the `assets` table plus `materials`/`focusSessions` on the
+ * registry records. All three are additive and optional-with-defaults, so a
+ * version 1 document still parses — which is exactly what
+ * `compatibleVersions: [1]` vouches for. Without it a `per-record` backend
+ * *discards* every document stamped 1 (it never migrates), and a year of habit
+ * days would disappear on the first restart after this change.
+ */
 export const habitDomainSpec = defineDomain({
   name: 'habit',
-  version: 1,
+  version: 2,
+  compatibleVersions: [1],
   layout: 'per-record',
   tables: {
     days: domainTable<DayKey, DayRecord>(dayRecord),
     counters: domainTable<'laundry', CounterRecord>(counterRecord),
     media: domainTable<string, MediaRecord>(mediaRecord),
     tasks: domainTable<string, TaskRecord>(taskRecord),
+    assets: domainTable<string, AssetRecord>(assetRecord),
   },
 })
 

@@ -78,6 +78,15 @@ const CALLS: readonly (readonly [RouteName, (client: ReturnType<typeof createHab
   ['stats', client => client.stats('2026-09-01', '2026-09-16')],
   ['exportBackup', client => client.exportAll()],
   ['importBackup', client => client.importAll('merge', { format: 'x' })],
+  // materials and focus mode
+  ['asset', client => client.assetUrl('a1')],
+  ['addAsset', client => client.addImageMaterial('task', 't1', { mime: 'image/png', data: 'AA==', name: 'x.png' })],
+  ['sweepAssets', client => client.sweepAssets()],
+  ['addMaterial', client => client.addTextMaterial('task', 't1', '## 标题')],
+  ['patchMaterial', client => client.patchTextMaterial('task', 't1', 'm1', '改过')],
+  ['removeMaterial', client => client.removeMaterial('task', 't1', 'm1')],
+  ['focusStart', client => client.startFocus('task', 't1')],
+  ['focusEnd', client => client.endFocus('task', 't1', 's1')],
 ]
 
 // --- the binding -------------------------------------------------------------
@@ -99,12 +108,21 @@ const PAYLOADS: Partial<Record<RouteName, unknown>> = {
   clock: { today: '2026-09-16', nightTail: false, now: 'x', config: {} },
   state: { ok: true, day: { date: '2026-09-16' } },
   exportBackup: { ok: true, backup: { format: 'x' } },
+  sweepAssets: { ok: true, removed: 0 },
+  focusStart: { ok: true, sessionId: 's1', entry: { id: 't1' } },
 }
 
 await checkAsync('every method uses its declared verb and path', async () => {
   for (const [name, call] of CALLS) {
     const { client, calls } = recording(PAYLOADS[name] ?? { ok: true })
     await call(client)
+    // The asset route is the exception that proves the rule: `<img src>` points
+    // at it and the browser's own image pipeline makes the request, so the
+    // client's only job is to build the URL (asserted separately below).
+    if (name === 'asset') {
+      assert.equal(calls.length, 0, 'asset is fetched by the browser, not by this client')
+      continue
+    }
     assert.equal(calls.length, 1, `${name} should make exactly one request`)
     const sent = calls[0]!
     assert.equal(sent.method, routes[name].method, `${name} verb`)
@@ -113,6 +131,29 @@ await checkAsync('every method uses its declared verb and path', async () => {
       `${name} path: ${sent.url} should start with ${API_PREFIX}${routes[name].request}`,
     )
   }
+})
+
+await checkAsync('the asset URL names the route the host serves bytes on', async () => {
+  const client = createHabitClient({ doFetch: (async () => new Response('{}')) as typeof fetch })
+  assert.equal(client.assetUrl('a1'), `${API_PREFIX}/asset?id=a1`)
+})
+
+await checkAsync('a material write carries the owner, the entry and the payload', async () => {
+  const { client, calls } = recording({ ok: true, entry: { id: 't1' } })
+  await client.addImageMaterial('media', 'm1', { mime: 'image/png', data: 'AA==', name: '长图.png' })
+  assert.equal(calls[0]!.method, 'POST')
+  assert.deepEqual(calls[0]!.body, {
+    kind: 'media', id: 'm1', mime: 'image/png', data: 'AA==', name: '长图.png',
+  })
+
+  const text = recording({ ok: true, entry: { id: 't1' } })
+  await text.client.addTextMaterial('task', 't1', '## 标题')
+  assert.deepEqual(text.calls[0]!.body, { kind: 'task', id: 't1', text: '## 标题' })
+
+  const removed = recording({ ok: true, entry: { id: 't1' } })
+  await removed.client.removeMaterial('task', 't1', 'md1')
+  assert.equal(removed.calls[0]!.url, `${API_PREFIX}/material?kind=task&id=t1&materialId=md1`)
+  assert.equal(removed.calls[0]!.method, 'DELETE')
 })
 
 await checkAsync('query parameters are sent and absent ones are omitted', async () => {

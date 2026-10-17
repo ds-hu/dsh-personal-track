@@ -7,7 +7,7 @@
  * per-day `dayFacts` are memoized, so a range costs one document read per day
  * no matter how many figures are derived from it.
  */
-import { paceMinPerKm, streakFor } from './derive.ts'
+import { focusSeconds, paceMinPerKm, streakFor } from './derive.ts'
 import { dayKeyRange, habitDayKey, type DayKey } from './daykey.ts'
 import type { DayBoundary } from './config.ts'
 import type { DayFacts, HabitStore } from './store.ts'
@@ -124,6 +124,17 @@ export interface StatsView {
     readonly open: number
     readonly doing: number
     readonly overdue: number
+  }
+  /**
+   * Time spent in focus mode, over both registries.
+   *
+   * A session belongs to the habit day it **started** on, and only closed ones
+   * count — an open session has no honest end
+   * (docs/adr/0002-derived-state-not-stored.md).
+   */
+  readonly focus: {
+    readonly seconds: number
+    readonly sessions: number
   }
 }
 
@@ -308,6 +319,15 @@ export function buildStats(
     return task.due !== undefined && completedDay !== undefined && completedDay > task.due
   }).length
 
+  // --- focus: closed sessions that started inside the range
+  const closedFocus = [
+    ...registry.media.flatMap(entry => entry.focusSessions),
+    ...registry.tasks.flatMap(entry => entry.focusSessions),
+  ].flatMap(session => (session.endedAt === undefined || !finishedInRange(session.startedAt)
+    ? []
+    : [{ startedAt: session.startedAt, endedAt: session.endedAt }]))
+  const focus = { seconds: focusSeconds(closedFocus), sessions: closedFocus.length }
+
   return {
     from,
     to,
@@ -373,5 +393,6 @@ export function buildStats(
       doing: registry.tasks.filter(task => task.state === 'doing').length,
       overdue: registry.tasks.filter(task => task.overdue).length,
     },
+    focus,
   }
 }

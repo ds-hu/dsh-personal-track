@@ -203,6 +203,27 @@ export function isOverdue(task: TaskRecord, today: DayKey): boolean {
   return task.due < today
 }
 
+/**
+ * Seconds spent focusing on one entry, summed over its sessions.
+ *
+ * Only **closed** sessions count. An open session has no end, and the three
+ * candidate guesses for one — "now", the last write, the page unload — all
+ * invent a duration that never happened, so it is dropped instead (the next
+ * `startFocus` clears it away). A backwards pair counts zero rather than
+ * negative time.
+ */
+export function focusSeconds(
+  sessions: readonly { readonly startedAt: string; readonly endedAt?: string }[],
+): number {
+  let total = 0
+  for (const session of sessions) {
+    if (session.endedAt === undefined) continue
+    const span = Date.parse(session.endedAt) - Date.parse(session.startedAt)
+    if (Number.isFinite(span) && span > 0) total += span / 1000
+  }
+  return Math.round(total)
+}
+
 /** Pace in minutes per kilometre; undefined when it cannot be computed. */
 export function paceMinPerKm(minutes: number, distanceKm: number): number | undefined {
   if (!(minutes > 0) || !(distanceKm > 0)) return undefined

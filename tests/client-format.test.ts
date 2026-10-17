@@ -25,7 +25,7 @@ import {
   weekEndKey,
 } from '../src/client/board/format.ts'
 import { dayReport } from '../src/client/board/report.ts'
-import type { ClockView, StateView } from '../src/client/types.ts'
+import type { ClockView, StateView, TaskEntry } from '../src/client/types.ts'
 
 let passed = 0
 
@@ -191,12 +191,24 @@ const reportState: StateView = {
   stock: { pending: 4, updatedAt: '2026-09-19T12:00:00' },
   media: [],
   tasks: [
-    { id: 't3', title: '交房租', due: '2026-09-15', progress: { current: 0 }, checkpoints: [], createdAt: '2026-09-10T10:00:00', state: 'todo', overdue: true },
-    { id: 't1', title: '英语口语', category: '英听说 A', due: '2026-09-20', progress: { current: 2, total: 5 }, checkpoints: [], createdAt: '2026-09-18T10:00:00', state: 'doing', overdue: false },
-    { id: 't2', title: '高数作业', due: '2026-09-24', progress: { current: 0, total: 1 }, checkpoints: [], createdAt: '2026-09-19T10:00:00', state: 'todo', overdue: false },
-    { id: 't4', title: '读书笔记', due: '2026-09-20', progress: { current: 3, total: 3 }, checkpoints: [], createdAt: '2026-09-17T10:00:00', state: 'done', completedAt: '2026-09-20T21:00:00', overdue: false },
+    taskOf({ id: 't3', title: '交房租', due: '2026-09-15', progress: { current: 0 }, checkpoints: [], createdAt: '2026-09-10T10:00:00', state: 'todo', overdue: true }),
+    taskOf({ id: 't1', title: '英语口语', category: '英听说 A', due: '2026-09-20', progress: { current: 2, total: 5 }, checkpoints: [], createdAt: '2026-09-18T10:00:00', state: 'doing', overdue: false }),
+    taskOf({ id: 't2', title: '高数作业', due: '2026-09-24', progress: { current: 0, total: 1 }, checkpoints: [], createdAt: '2026-09-19T10:00:00', state: 'todo', overdue: false }),
+    taskOf({ id: 't4', title: '读书笔记', due: '2026-09-20', progress: { current: 3, total: 3 }, checkpoints: [], createdAt: '2026-09-17T10:00:00', state: 'done', completedAt: '2026-09-20T21:00:00', overdue: false }),
   ],
 }
+/**
+ * One task as the report sees it.
+ *
+ * `dayReport` reads a task's title, category, deadline and progress and nothing
+ * else, so the fields that materials and focus mode added are filled in here
+ * rather than repeated in every fixture below — and a field the report *did*
+ * read would have to be stated on purpose.
+ */
+function taskOf(entry: Omit<TaskEntry, 'materials' | 'focusSessions' | 'focusSeconds'>): TaskEntry {
+  return { materials: [], focusSessions: [], focusSeconds: 0, ...entry }
+}
+
 const reportText = dayReport(reportState, reportClock)
 check('the header names the day (or the night tail) and the completion figure', () => {
   assert.ok(reportText.startsWith('习惯日报 9月20日 周日\n'), reportText.split('\n')[0])
@@ -230,12 +242,12 @@ check('the remaining-task list reads in the board\'s order: deadline ascending, 
   const shuffled: StateView = {
     ...reportState,
     tasks: [
-      { id: 't5', title: '修台灯', progress: { current: 0 }, checkpoints: [], createdAt: '2026-09-11T10:00:00', state: 'todo', overdue: false },
-      { id: 't2', title: '高数作业', due: '2026-09-24', progress: { current: 0, total: 1 }, checkpoints: [], createdAt: '2026-09-19T10:00:00', state: 'todo', overdue: false },
-      { id: 't4', title: '读书笔记', due: '2026-09-20', progress: { current: 3, total: 3 }, checkpoints: [], createdAt: '2026-09-17T10:00:00', state: 'done', completedAt: '2026-09-20T21:00:00', overdue: false },
-      { id: 't6', title: '买菜', progress: { current: 0 }, checkpoints: [], createdAt: '2026-09-19T18:00:00', state: 'todo', overdue: false },
-      { id: 't3', title: '交房租', due: '2026-09-15', progress: { current: 0 }, checkpoints: [], createdAt: '2026-09-10T10:00:00', state: 'todo', overdue: true },
-      { id: 't1', title: '英语口语', category: '英听说 A', due: '2026-09-20', progress: { current: 2, total: 5 }, checkpoints: [], createdAt: '2026-09-18T10:00:00', state: 'doing', overdue: false },
+      taskOf({ id: 't5', title: '修台灯', progress: { current: 0 }, checkpoints: [], createdAt: '2026-09-11T10:00:00', state: 'todo', overdue: false }),
+      taskOf({ id: 't2', title: '高数作业', due: '2026-09-24', progress: { current: 0, total: 1 }, checkpoints: [], createdAt: '2026-09-19T10:00:00', state: 'todo', overdue: false }),
+      taskOf({ id: 't4', title: '读书笔记', due: '2026-09-20', progress: { current: 3, total: 3 }, checkpoints: [], createdAt: '2026-09-17T10:00:00', state: 'done', completedAt: '2026-09-20T21:00:00', overdue: false }),
+      taskOf({ id: 't6', title: '买菜', progress: { current: 0 }, checkpoints: [], createdAt: '2026-09-19T18:00:00', state: 'todo', overdue: false }),
+      taskOf({ id: 't3', title: '交房租', due: '2026-09-15', progress: { current: 0 }, checkpoints: [], createdAt: '2026-09-10T10:00:00', state: 'todo', overdue: true }),
+      taskOf({ id: 't1', title: '英语口语', category: '英听说 A', due: '2026-09-20', progress: { current: 2, total: 5 }, checkpoints: [], createdAt: '2026-09-18T10:00:00', state: 'doing', overdue: false }),
     ],
   }
   const tail = dayReport(shuffled, reportClock).split('剩余任务：\n\n')[1]

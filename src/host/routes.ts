@@ -19,8 +19,9 @@ import { dayKeySpan, habitDayKey, instantForHabitDay, isNightTail, type DayKey }
 import { mediaRecord, taskRecord } from './domain.ts'
 import { ApiError } from './api-error.ts'
 import { buildStats } from './stats.ts'
-import type { HabitStore, SessionKind } from './store.ts'
+import { base64Bytes, type HabitStore, type SessionKind } from './store.ts'
 import type { RouteName } from '../shared/route.ts'
+import { MAX_IMAGE_BYTES } from '../shared/route.ts'
 
 /** Everything a handler needs from the plugin, already resolved. */
 export interface RouteCtx {
@@ -46,7 +47,25 @@ export interface RouteCtx {
 }
 
 /** A body to answer with; the transport decides the status line. */
-export type RouteResult = Record<string, unknown>
+export type RouteResult = Record<string, unknown> | BinaryResult
+
+/**
+ * A route that answers with bytes instead of a JSON body.
+ *
+ * The marker is part of the result type rather than a side channel, so `asset`
+ * stays an ordinary entry in the handler table — which is what keeps the
+ * "declared routes == implemented routes" invariant whole — and the transport
+ * remains the only layer that knows how to write one.
+ */
+export interface BinaryResult {
+  readonly binary: {
+    readonly contentType: string
+    /** Base64 payload; the transport decodes it into the response body. */
+    readonly base64: string
+    /** How long a browser may keep it. Assets are immutable per id. */
+    readonly cacheSeconds: number
+  }
+}
 
 /**
  * One route's implementation.
@@ -64,6 +83,48 @@ export type RouteHandler = (
 
 /** A backup file is far larger than an ordinary mutation body. */
 export const BACKUP_BODY_LIMIT = 16 * 1024 * 1024
+
+/**
+ * One image, base64-encoded. Sized from the wire constant the browser half also
+ * enforces, plus the JSON framing a request adds around it.
+ */
+export const ASSET_BODY_LIMIT = Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 64 * 1024
+
+/** One Markdown block is text, but a long note still dwarfs a mutation body. */
+export const MATERIAL_BODY_LIMIT = 512 * 1024
+
+/** The longest single Markdown block the plugin stores, in characters. */
+export const MAX_MATERIAL_CHARS = 64 * 1024
+
+/** Which registry entry a material or focus request addresses. */
+const ownerTarget = z.object({
+  kind: z.enum(['task', 'media']),
+  id: z.string().min(1),
+})
+
+/**
+ * One image's base64 payload: base64 by shape, bounded by the wire cap.
+ *
+ * The cap is checked on the **decoded** byte count, because that is the number
+ * the browser half measured against the same constant — and because an encoded
+ * length is up to three bytes coarser than the payload it carries, so a limit
+ * compared against the string would let a payload of `MAX + 1` bytes through.
+ */
+const imageData = z.string().min(1).refine(
+  (value) => /^[A-Za-z0-9+/]+={0,2}$/.test(value) && value.length % 4 === 0,
+  'data must be base64',
+).refine(
+  (value) => base64Bytes(value) <= MAX_IMAGE_BYTES,
+  '图片超过上限',
+)
+
+/** The registry entry a mutation just changed, in the view's own shape. */
+function entryOf(ctx: RouteCtx, kind: 'task' | 'media', id: string): unknown {
+  const view = ctx.store.view(ctx.today(), ctx.today())
+  return kind === 'task'
+    ? view.tasks.find(entry => entry.id === id)
+    : view.media.find(entry => entry.id === id)
+}
 
 const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD')
 const ISO = z.string().min(1)
@@ -488,5 +549,83 @@ export const handlers: Record<RouteName, RouteHandler> = {
     const body = ctx.parse(z.object({ id: z.string().min(1) }), query, 'task delete')
     const removed = await ctx.store.deleteTask(body.id)
     return { ok: true, removed, tasks: ctx.store.view(ctx.today(), ctx.today()).tasks }
+  },
+
+  // --- materials: the ordered text/image stream on a registry entry --------
+
+  async asset(ctx, _body, query) {
+    const { id } = ctx.parse(z.object({ id: z.string().min(1) }), query, 'asset')
+    const asset = ctx.store.readAsset(id)
+    // A missing image is a 404, not an empty body: the `<img>` that asked gets
+    // a status it can act on instead of a silently broken picture.
+    if (asset === undefined) throw new ApiError(404, 'habit/not-found', 'no such asset')
+    return {
+      binary: {
+        contentType: asset.mime,
+        base64: asset.data,
+        // Content is immutable per id, so a browser may keep it indefinitely.
+        cacheSeconds: 31_536_000,
+      },
+    }
+  },
+
+  async addAsset(ctx, body) {
+    const raw = ctx.parse(ownerTarget.extend({
+      mime: z.string().min(1).max(128),
+      data: imageData,
+      name: z.string().max(256).optional(),
+    }), body, 'asset')
+    await ctx.store.addMaterialImage(raw.kind, raw.id, {
+      mime: raw.mime,
+      data: raw.data,
+      ...(raw.name === undefined ? {} : { name: raw.name }),
+    })
+    return { ok: true, entry: entryOf(ctx, raw.kind, raw.id) }
+  },
+
+  async sweepAssets(ctx) {
+    const removed = await ctx.store.sweepOrphanAssets()
+    return { ok: true, removed }
+  },
+
+  async addMaterial(ctx, body) {
+    const raw = ctx.parse(ownerTarget.extend({
+      text: z.string().max(MAX_MATERIAL_CHARS),
+    }), body, 'material')
+    await ctx.store.addMaterialText(raw.kind, raw.id, raw.text)
+    return { ok: true, entry: entryOf(ctx, raw.kind, raw.id) }
+  },
+
+  async patchMaterial(ctx, body) {
+    const raw = ctx.parse(ownerTarget.extend({
+      materialId: z.string().min(1),
+      text: z.string().max(MAX_MATERIAL_CHARS),
+    }), body, 'material patch')
+    await ctx.store.patchMaterialText(raw.kind, raw.id, raw.materialId, raw.text)
+    return { ok: true, entry: entryOf(ctx, raw.kind, raw.id) }
+  },
+
+  async removeMaterial(ctx, _body, query) {
+    const raw = ctx.parse(ownerTarget.extend({
+      materialId: z.string().min(1),
+    }), query, 'material delete')
+    await ctx.store.removeMaterial(raw.kind, raw.id, raw.materialId)
+    return { ok: true, entry: entryOf(ctx, raw.kind, raw.id) }
+  },
+
+  // --- focus sessions: instants only, duration derived ---------------------
+
+  async focusStart(ctx, body) {
+    const raw = ctx.parse(ownerTarget, body, 'focus')
+    const sessionId = await ctx.store.startFocus(raw.kind, raw.id)
+    return { ok: true, sessionId, entry: entryOf(ctx, raw.kind, raw.id) }
+  },
+
+  async focusEnd(ctx, body) {
+    const raw = ctx.parse(ownerTarget.extend({
+      sessionId: z.string().min(1),
+    }), body, 'focus end')
+    await ctx.store.endFocus(raw.kind, raw.id, raw.sessionId)
+    return { ok: true, entry: entryOf(ctx, raw.kind, raw.id) }
   },
 }

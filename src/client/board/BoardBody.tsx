@@ -24,6 +24,7 @@ import { CheckTile, LaundryTile, MealBoard } from './cards.tsx'
 import { Chip } from './Chip.tsx'
 import { DateNav } from './DateNav.tsx'
 import { EquipmentCard, PlankCard, PullupCard, RopeCard, RunTile } from './fitness.tsx'
+import type { RegistryEntry } from './focus.ts'
 import { fractionText, messageOf } from './format.ts'
 import { MediaTile, TaskTile } from './registry.tsx'
 import { dayReport } from './report.ts'
@@ -77,12 +78,14 @@ export function BoardIcon({ size = 16, className }: {
 /** Props handed in by the slot registration's injection face. */
 export interface BoardBodyProps {
   readonly client: HabitClient
-  /** Opens the statistics page in the main area. */
-  readonly openStats: () => void
+  /** Switches the panel to its statistics view. */
+  readonly onShowStats: () => void
+  /** Opens one registry entry in focus mode. */
+  readonly onOpenFocus: (entry: RegistryEntry) => void
 }
 
 /** Render the board. */
-export function BoardBody({ client, openStats }: BoardBodyProps): JSX.Element {
+export function BoardBody({ client, onShowStats, onOpenFocus }: BoardBodyProps): JSX.Element {
   const [clock, setClock] = useState<ClockView | null>(null)
   const [date, setDate] = useState<string | null>(null)
   const [state, setState] = useState<StateView | null>(null)
@@ -225,7 +228,7 @@ export function BoardBody({ client, openStats }: BoardBodyProps): JSX.Element {
         />
         {day === undefined ? null : <Chip cells={day.cells} progress={day.progress} />}
         <span className="pt-grow" />
-        <button type="button" className="pt-ghost" onClick={openStats} title="打开统计页">统计</button>
+        <button type="button" className="pt-ghost" onClick={onShowStats} title="切到统计视图">统计</button>
       </div>
 
       <DateNav date={date} today={clock.today} night={clock.nightTail} onChange={goTo} />
@@ -305,6 +308,7 @@ export function BoardBody({ client, openStats }: BoardBodyProps): JSX.Element {
           onAdd={(input: MediaInput) => registryAct(() => client.addMedia(input))}
           onPatch={(id, patch: MediaPatch) => registryAct(() => client.patchMedia(id, patch))}
           onRemove={id => registryAct(() => client.removeMedia(id))}
+          onFocus={onOpenFocus}
         />
         <TaskTile
           tasks={state?.tasks ?? []}
@@ -313,6 +317,7 @@ export function BoardBody({ client, openStats }: BoardBodyProps): JSX.Element {
           onAdd={(input: TaskInput) => registryAct(() => client.addTask(input))}
           onPatch={(id, patch: TaskPatch) => registryAct(() => client.patchTask(id, patch))}
           onRemove={id => registryAct(() => client.removeTask(id))}
+          onFocus={onOpenFocus}
         />
 
         {record === null ? (

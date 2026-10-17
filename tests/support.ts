@@ -20,17 +20,38 @@ import {
   type HabitDomain,
 } from '../src/host/domain.ts'
 import type { DomainSpec } from '@deepseek-ai/dsh-storage-domain'
+import type { ZodType } from 'zod'
 import { type HabitHandler, type HabitRequest, type HabitResponse, API_PREFIX, createApiHandler } from '../src/host/api.ts'
 import { createHabitStore, type HabitStore } from '../src/host/store.ts'
 
 // --- the in-memory domain ----------------------------------------------------
 
-/** One table's storage: a map, a size, and the domain's single write chain. */
+/**
+ * One table's storage: a map, a size, and the domain's single write chain.
+ *
+ * It validates like the real thing. The genuine domain parses every record
+ * against its schema at the durable boundary, which is where a schema's
+ * defaults (`materials: []`, `focusSessions: []`) actually get filled in — a
+ * fake that skipped that step would let in-memory records drift into shapes
+ * storage could never produce, and the rules under test would be testing the
+ * wrong object.
+ */
 class MemoryTable {
   readonly records = new Map<string, unknown>()
 
+  readonly #schema: ZodType | undefined
+
   /** Tail of the per-domain write chain; `update` serializes on it. */
   #chain: Promise<unknown> = Promise.resolve()
+
+  constructor(schema?: ZodType) {
+    this.#schema = schema
+  }
+
+  /** Parse one record the way the durable boundary would. */
+  #parse(value: unknown): unknown {
+    return this.#schema === undefined ? value : this.#schema.parse(value)
+  }
 
   get size(): number {
     return this.records.size
@@ -50,7 +71,7 @@ class MemoryTable {
   }
 
   async put(key: string, value: unknown): Promise<void> {
-    this.records.set(key, value)
+    this.records.set(key, this.#parse(value))
   }
 
   async delete(key: string): Promise<boolean> {
@@ -69,7 +90,7 @@ class MemoryTable {
       if (current === undefined) {
         throw Object.assign(new Error(`missing-key: ${key}`), { code: 'missing-key' })
       }
-      const next = fn(current)
+      const next = this.#parse(fn(current))
       this.records.set(key, next)
       return next
     })
@@ -101,8 +122,9 @@ class MemoryDomain<S extends DomainSpec> {
   table(name: string): MemoryTable {
     const existing = this.#tables.get(name)
     if (existing !== undefined) return existing
-    if (!(name in this.#spec.tables)) throw new Error(`undeclared table: ${name}`)
-    const created = new MemoryTable()
+    const declared = this.#spec.tables[name]
+    if (declared === undefined) throw new Error(`undeclared table: ${name}`)
+    const created = new MemoryTable(declared.valueSchema as ZodType)
     this.#tables.set(name, created)
     return created
   }
@@ -140,7 +162,12 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
 /** One response as the driver captured it. */
 export interface CallResult {
   readonly status: number
+  /** The JSON body; `{}` for a response that carried bytes instead. */
   readonly body: Record<string, unknown>
+  /** The response's own content-type, when it declared one. */
+  readonly contentType?: string
+  /** Raw bytes, for the one route that answers with them. */
+  readonly bytes?: Buffer
 }
 
 /** A built plugin: the store, the backup surface and the route handler. */
@@ -154,6 +181,8 @@ export interface Harness {
   call(method: string, path: string, body?: unknown): Promise<CallResult>
   /** Drive one route and return the refreshed state slice. */
   state(method: string, path: string, body?: unknown): Promise<Record<string, unknown>>
+  /** Drive one route and return the entry it answers with. */
+  entry(method: string, path: string, body?: unknown): Promise<Record<string, unknown>>
   /** Import a bundle straight through the backup surface. */
   import(mode: ImportMode, backup: unknown): Promise<unknown>
 }
@@ -192,17 +221,27 @@ export function createHarness(options: {
   }
 
   /** A response double, capturing what the handler wrote. */
-  const captured: { status: number; body: Record<string, unknown> } = { status: 0, body: {} }
+  const captured: { status: number; body: Record<string, unknown>; contentType?: string; bytes?: Buffer } =
+    { status: 0, body: {} }
   let settle: (value: CallResult) => void = () => {}
 
   function response(): { res: HabitResponse; result: Promise<CallResult> } {
     return {
       res: {
-        writeHead(status: number): void {
+        writeHead(status: number, headers?: Record<string, string>): void {
           captured.status = status
+          captured.contentType = headers?.['content-type']
         },
-        end(body?: string): void {
-          captured.body = body === undefined ? {} : JSON.parse(body) as Record<string, unknown>
+        // A string is a JSON body; a buffer is the asset route's bytes. Keeping
+        // both arms here is what lets the binary path be asserted without a
+        // socket — the transport decides which one it writes, not the test.
+        end(body?: string | Buffer): void {
+          if (typeof body === 'string') {
+            captured.body = body === '' ? {} : JSON.parse(body) as Record<string, unknown>
+          } else if (body !== undefined) {
+            captured.bytes = body
+            captured.body = {}
+          }
           settle(captured)
         },
       },
@@ -230,6 +269,12 @@ export function createHarness(options: {
       const result = await call(method, path, body)
       assert.equal(result.body.ok, true, `${method} ${path} should answer with a state slice: ${JSON.stringify(result.body)}`)
       return result.body
+    },
+    async entry(method, path, body) {
+      const result = await call(method, path, body)
+      assert.equal(result.status, 200, `${method} ${path} should succeed: ${JSON.stringify(result.body)}`)
+      assert.ok(result.body.entry, `${method} ${path} should answer with the entry it changed`)
+      return result.body.entry as Record<string, unknown>
     },
     import: (mode, value) => backup.importAll(value, mode),
   }

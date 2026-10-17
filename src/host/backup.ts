@@ -2,38 +2,49 @@
  * Backup: the whole `habit` domain as one portable JSON document, and the way
  * back in.
  *
- * A backup holds **stored facts only** — days, the laundry counter, media and
- * tasks (docs/adr/0002-derived-state-not-stored.md). No cell, ratio, streak or
- * overdue flag appears in it, so importing one recomputes all of them from the
- * records themselves; there is nothing in the file that can disagree with the
- * data it came from.
+ * A backup holds **stored facts only** — days, the laundry counter, media,
+ * tasks, and the material images those entries reference
+ * (docs/adr/0002-derived-state-not-stored.md). No cell, ratio, streak, overdue
+ * flag or focus duration appears in it, so importing one recomputes all of them
+ * from the records themselves; there is nothing in the file that can disagree
+ * with the data it came from.
  *
  * The file is validated in full *before* anything is written, so a truncated
  * or hand-edited backup is refused as a whole instead of landing half-applied.
  */
 import { z } from 'zod'
-import { counterRecord, dayRecord, mediaRecord, taskRecord } from './domain.ts'
+import { assetRecord, counterRecord, dayRecord, mediaRecord, taskRecord } from './domain.ts'
 import type { HabitDomain } from './domain.ts'
 import type { DayKey } from './daykey.ts'
 
 /** Format marker: a file that does not carry it is not a backup of ours. */
 export const BACKUP_FORMAT = 'personal-track/backup'
 
-/** Layout version of the file itself; a shape change bumps this. */
-export const BACKUP_VERSION = 1
+/**
+ * Layout version of the file itself; a shape change bumps this.
+ *
+ * Version 2 adds the `assets` array (version 1 files carry no images, and read
+ * back as an empty asset set).
+ */
+export const BACKUP_VERSION = 2
+
+/** Every file layout this build can read. */
+export const READABLE_BACKUP_VERSIONS: readonly number[] = [1, BACKUP_VERSION]
 
 const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/
 
 /** The file layout. Arrays, not maps: each record already carries its own key. */
 export const backupBundle = z.object({
   format: z.literal(BACKUP_FORMAT),
-  version: z.literal(BACKUP_VERSION),
+  version: z.union([z.literal(1), z.literal(2)]),
   /** When the file was written; informational, never applied on import. */
   exportedAt: z.string().min(1),
   days: z.array(dayRecord.extend({ date: z.string().regex(DATE_KEY, 'date must be YYYY-MM-DD') })),
   counters: z.record(z.string(), counterRecord),
   media: z.array(mediaRecord),
   tasks: z.array(taskRecord),
+  /** Material image bytes. Absent in a version 1 file, which carries no images. */
+  assets: z.array(assetRecord).default([]),
 })
 
 /** One parsed backup file. */
@@ -49,6 +60,8 @@ export interface ImportReport {
   readonly media: number
   readonly tasks: number
   readonly counters: number
+  /** Material images carried by the file (version 2 and up). */
+  readonly assets: number
   /** Records dropped because `replace` cleared keys the file did not carry. */
   readonly removed: number
 }
@@ -89,8 +102,10 @@ export function readBackup(value: unknown): BackupBundle {
   if (shape.format !== BACKUP_FORMAT) {
     throw new BackupFormatError('这不是本插件的备份文件（缺少 format 标记）')
   }
-  if (shape.version !== BACKUP_VERSION) {
-    throw new BackupFormatError(`备份版本 ${String(shape.version)} 无法读取（当前支持 ${BACKUP_VERSION}）`)
+  if (typeof shape.version !== 'number' || !READABLE_BACKUP_VERSIONS.includes(shape.version)) {
+    throw new BackupFormatError(
+      `备份版本 ${String(shape.version)} 无法读取（当前支持 ${READABLE_BACKUP_VERSIONS.join(' / ')}）`,
+    )
   }
 
   const issue = result.error.issues[0]
@@ -106,6 +121,7 @@ export function createBackup(domain: HabitDomain): Backup {
   const counters = domain.table('counters')
   const media = domain.table('media')
   const tasks = domain.table('tasks')
+  const assets = domain.table('assets')
 
   const byCreatedAt = <T extends { createdAt: string }>(records: T[]): T[] =>
     records.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))
@@ -135,6 +151,7 @@ export function createBackup(domain: HabitDomain): Backup {
         counters: Object.fromEntries(counters.entries()),
         media: byCreatedAt([...media.entries()].map(([, record]) => record)),
         tasks: byCreatedAt([...tasks.entries()].map(([, record]) => record)),
+        assets: [...assets.entries()].map(([, record]) => record),
       }
     },
 
@@ -148,6 +165,16 @@ export function createBackup(domain: HabitDomain): Backup {
           throw new BackupFormatError(`备份文件无效：任务「${task.title}」的检查点缺少目标量`)
         }
       }
+      // The second cross-record rule: a material image is a reference, so the
+      // bytes it names have to be in the same file. Dropping the reference
+      // instead would silently answer "imported" to a file that lost images.
+      const assetIds = new Set(bundle.assets.map(record => record.id))
+      for (const record of [...bundle.media, ...bundle.tasks]) {
+        for (const material of record.materials) {
+          if (material.kind !== 'image' || assetIds.has(material.assetId)) continue
+          throw new BackupFormatError(`备份文件无效：「${record.title}」的图片素材缺少对应数据`)
+        }
+      }
       const dayKeys = new Set(bundle.days.map(record => record.date as DayKey))
       const counterKeys = new Set(Object.keys(bundle.counters))
       const mediaIds = new Set(bundle.media.map(record => record.id))
@@ -159,6 +186,9 @@ export function createBackup(domain: HabitDomain): Backup {
         removed += await prune(counters, counterKeys)
         removed += await prune(media, mediaIds)
         removed += await prune(tasks, taskIds)
+        // Assets are keyed by id alone; `replace` clears the ones the file
+        // omits, which is also what makes a restore into a dirty root exact.
+        removed += await prune(assets, assetIds)
       }
 
       for (const record of bundle.days) await days.put(record.date as DayKey, record)
@@ -167,6 +197,7 @@ export function createBackup(domain: HabitDomain): Backup {
       }
       for (const record of bundle.media) await media.put(record.id, record)
       for (const record of bundle.tasks) await tasks.put(record.id, record)
+      for (const record of bundle.assets) await assets.put(record.id, record)
 
       return {
         mode,
@@ -174,6 +205,7 @@ export function createBackup(domain: HabitDomain): Backup {
         media: bundle.media.length,
         tasks: bundle.tasks.length,
         counters: counterKeys.size,
+        assets: bundle.assets.length,
         removed,
       }
     },

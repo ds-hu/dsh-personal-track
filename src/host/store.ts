@@ -14,16 +14,20 @@ import { randomUUID } from 'node:crypto'
 import { ApiError } from './api-error.ts'
 import { clockOf, type Config, type VocabTarget } from './config.ts'
 import type {
+  AssetRecord,
   CounterRecord,
   DayRecord,
   HabitDomain,
+  Material,
   MediaRecord,
+  RegistryRecord,
   TaskRecord,
 } from './domain.ts'
-import { dayRecord, mediaRecord, taskRecord } from './domain.ts'
+import { assetRecord, dayRecord, mediaRecord, taskRecord } from './domain.ts'
 import {
   cellProgress,
   dayCells,
+  focusSeconds,
   isOverdue,
   isPerfectDay,
   taskState,
@@ -59,8 +63,41 @@ export interface DayView {
 export interface StateView {
   readonly day: DayView
   readonly stock: CounterRecord
-  readonly media: MediaRecord[]
+  readonly media: MediaView[]
   readonly tasks: TaskView[]
+}
+
+/**
+ * One material as a view carries it.
+ *
+ * The stored shape is the reference; the view adds what the asset document
+ * knows — its mime and its byte size — because those are derived values, and
+ * deriving them here is what keeps a size out of storage
+ * (docs/adr/0002-derived-state-not-stored.md). Both are absent when the asset
+ * itself is gone, which a hand-edited backup can produce; the board draws such
+ * a material as missing rather than silently as an empty image.
+ */
+export type MaterialView =
+  | { readonly kind: 'md'; readonly id: string; readonly text: string }
+  | {
+      readonly kind: 'image'
+      readonly id: string
+      readonly assetId: string
+      readonly name?: string
+      readonly createdAt: string
+      readonly mime?: string
+      readonly bytes?: number
+    }
+
+/**
+ * A media entry plus everything the view derives from it.
+ *
+ * `focusSeconds` is the same rule the task side follows: sessions are the
+ * fact, time spent is the read-side sum.
+ */
+export interface MediaView extends Omit<MediaRecord, 'materials'> {
+  readonly materials: MaterialView[]
+  readonly focusSeconds: number
 }
 
 /**
@@ -70,6 +107,19 @@ export interface StateView {
 export interface TaskView extends TaskRecord {
   readonly state: TaskState
   readonly overdue: boolean
+  readonly materials: MaterialView[]
+  readonly focusSeconds: number
+}
+
+/** Which registry a material or focus session belongs to. */
+export type OwnerKind = 'task' | 'media'
+
+/** One image a caller hands the store; the id and instant are the store's. */
+export interface NewImage {
+  readonly mime: string
+  /** Base64 payload. */
+  readonly data: string
+  readonly name?: string
 }
 
 /** Everything derived from one habit day, with its document read once. */
@@ -114,6 +164,22 @@ export interface HabitStore {
   /** Patch fields; `null` clears one, and completion follows progress. */
   patchTask(id: string, patch: Record<string, unknown>): Promise<TaskRecord>
   deleteTask(id: string): Promise<boolean>
+  /** Append one Markdown block to a registry entry's materials. */
+  addMaterialText(owner: OwnerKind, id: string, text: string): Promise<void>
+  /** Store one image and append it to a registry entry's materials. */
+  addMaterialImage(owner: OwnerKind, id: string, image: NewImage): Promise<void>
+  /** Rewrite one Markdown block's text. */
+  patchMaterialText(owner: OwnerKind, id: string, materialId: string, text: string): Promise<void>
+  /** Remove one material; an image takes its asset with it. */
+  removeMaterial(owner: OwnerKind, id: string, materialId: string): Promise<void>
+  /** One stored image, or undefined. */
+  readAsset(assetId: string): AssetRecord | undefined
+  /** Open a focus session; one a crash left open is dropped first. */
+  startFocus(owner: OwnerKind, id: string): Promise<string>
+  /** Close one focus session; an already-closed one is left alone. */
+  endFocus(owner: OwnerKind, id: string, sessionId: string): Promise<void>
+  /** Delete every asset nothing references; answers how many went. */
+  sweepOrphanAssets(): Promise<number>
   newId(): string
 }
 
@@ -126,6 +192,37 @@ const SESSION_FIELD = {
   equipment: 'equipment',
   washing: 'washing',
 } as const
+
+/**
+ * One registry table, as the shared material and focus paths see it.
+ *
+ * `tasks` and `media` are separate typed handles, and a union of two generic
+ * handles is not callable — their `update` signatures do not unify. The bridge
+ * is written once here instead of casting at every call site, and
+ * `parseRegistry` is what keeps the two record schemas apart.
+ */
+interface RegistryTable {
+  get(key: string): RegistryRecord | undefined
+  delete(key: string): Promise<boolean>
+  update(key: string, fn: (current: RegistryRecord) => RegistryRecord): Promise<RegistryRecord>
+  entries(): IterableIterator<[string, RegistryRecord]>
+}
+
+/**
+ * The bytes a base64 payload decodes to, derived from its length.
+ *
+ * Derived on purpose: storing a size next to the bytes would be a second copy
+ * of the same fact, and the whole point of the assets table is that the bytes
+ * are the only thing about an image that is stored
+ * (docs/adr/0002-derived-state-not-stored.md). The API's size cap measures the
+ * same way, so the limit the picker applies and the limit the host enforces are
+ * the same limit — an encoded length is up to three bytes coarser than the
+ * payload it carries.
+ */
+export function base64Bytes(data: string): number {
+  const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0
+  return Math.max(0, Math.floor((data.length * 3) / 4) - padding)
+}
 
 /** An empty progress, used only when a record somehow carries no vocabulary. */
 const NO_PROGRESS: VocabProgress = {
@@ -195,6 +292,7 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
   const counters = domain.table('counters')
   const media = domain.table('media')
   const tasks = domain.table('tasks')
+  const assets = domain.table('assets')
 
   /**
    * The clock every derived instant is stamped with.
@@ -301,6 +399,60 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
   const byCreatedAtDesc = <T extends { createdAt: string }>(entries: Iterable<T>): T[] =>
     [...entries].sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))
 
+  /** The table behind one registry kind, seen through the shared bridge. */
+  const registryTable = (owner: OwnerKind): RegistryTable =>
+    (owner === 'task' ? tasks : media) as unknown as RegistryTable
+
+  /** Parse a record with the schema of its own registry. */
+  const parseRegistry = (owner: OwnerKind, record: Record<string, unknown>): RegistryRecord =>
+    owner === 'task' ? taskRecord.parse(record) : mediaRecord.parse(record)
+
+  /**
+   * Read-modify-write one registry entry.
+   *
+   * `update` is the domain's atomic per-record transform, so two pastes landing
+   * together cannot lose one of them; a missing entry rejects with
+   * `missing-key`, which the transport maps to a 404.
+   */
+  const updateRegistry = (
+    owner: OwnerKind,
+    id: string,
+    apply: (record: RegistryRecord) => RegistryRecord,
+  ): Promise<RegistryRecord> => registryTable(owner).update(id, apply)
+
+  /** One material with its asset's derived facts — mime and size — attached. */
+  function materialView(material: Material): MaterialView {
+    if (material.kind === 'md') return material
+    const asset = assets.get(material.assetId)
+    return asset === undefined
+      ? material
+      : { ...material, mime: asset.mime, bytes: base64Bytes(asset.data) }
+  }
+
+  /** A media record as the view carries it: materials joined, focus time derived. */
+  function mediaView(record: MediaRecord): MediaView {
+    return {
+      ...record,
+      materials: record.materials.map(materialView),
+      focusSeconds: focusSeconds(record.focusSessions),
+    }
+  }
+
+  /**
+   * Delete the assets a departing entry's image materials referenced.
+   *
+   * Called *after* the record is gone: a crash in between leaves an orphan
+   * asset, which {@link HabitStore.sweepOrphanAssets} can find, whereas the
+   * other order would leave a material pointing at nothing and draw a broken
+   * image on the board.
+   */
+  async function dropAssetsOf(record: RegistryRecord | undefined): Promise<void> {
+    if (record === undefined) return
+    for (const material of record.materials) {
+      if (material.kind === 'image') await assets.delete(material.assetId)
+    }
+  }
+
   const store: HabitStore = {
     readDay: key => days.get(key),
 
@@ -334,11 +486,13 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
           progress: facts.progress,
         },
         stock: stock(),
-        media: byCreatedAtDesc([...media.entries()].map(([, record]) => record)),
+        media: byCreatedAtDesc([...media.entries()].map(([, record]) => record)).map(mediaView),
         tasks: byCreatedAtDesc([...tasks.entries()].map(([, record]) => record)).map(record => ({
           ...record,
           state: taskState(record),
           overdue: isOverdue(record, today),
+          materials: record.materials.map(materialView),
+          focusSeconds: focusSeconds(record.focusSessions),
         })),
       }
     },
@@ -402,7 +556,12 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
       return parsed
     }),
 
-    deleteMedia: id => media.delete(id),
+    deleteMedia: async (id) => {
+      const record = media.get(id)
+      const removed = await media.delete(id)
+      await dropAssetsOf(record)
+      return removed
+    },
 
     putTask: async input => {
       // Parsed here rather than trusted: callers hand over a record they
@@ -451,7 +610,109 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
       return syncCheckpoints(task, now)
     }),
 
-    deleteTask: id => tasks.delete(id),
+    deleteTask: async (id) => {
+      const record = tasks.get(id)
+      const removed = await tasks.delete(id)
+      await dropAssetsOf(record)
+      return removed
+    },
+
+    addMaterialText: async (owner, id, text) => {
+      await updateRegistry(owner, id, record => ({
+        ...record,
+        materials: [...record.materials, { kind: 'md', id: randomUUID(), text }],
+      }))
+    },
+
+    addMaterialImage: async (owner, id, image) => {
+      const assetId = randomUUID()
+      const createdAt = now().toISOString()
+      // Bytes first: a failure between the two writes leaves an orphan asset,
+      // which the sweep reclaims, rather than a material pointing at nothing.
+      await assets.put(assetId, assetRecord.parse({
+        id: assetId,
+        mime: image.mime,
+        data: image.data,
+        createdAt,
+      }))
+      await updateRegistry(owner, id, record => ({
+        ...record,
+        materials: [...record.materials, {
+          kind: 'image',
+          id: randomUUID(),
+          assetId,
+          createdAt,
+          ...(image.name === undefined ? {} : { name: image.name }),
+        }],
+      }))
+    },
+
+    patchMaterialText: async (owner, id, materialId, text) => {
+      await updateRegistry(owner, id, record => ({
+        ...record,
+        materials: record.materials.map(material =>
+          material.kind === 'md' && material.id === materialId ? { ...material, text } : material),
+      }))
+    },
+
+    removeMaterial: async (owner, id, materialId) => {
+      // Read the reference before the write: once the material is gone, the
+      // asset id it pointed at is unrecoverable from the record.
+      const before = registryTable(owner).get(id)
+      const gone = before?.materials.find(material => material.id === materialId)
+      await updateRegistry(owner, id, record => ({
+        ...record,
+        materials: record.materials.filter(material => material.id !== materialId),
+      }))
+      if (gone?.kind === 'image') await assets.delete(gone.assetId)
+    },
+
+    readAsset: assetId => assets.get(assetId),
+
+    startFocus: async (owner, id) => {
+      const startedAt = now().toISOString()
+      const sessionId = randomUUID()
+      await updateRegistry(owner, id, record => ({
+        ...record,
+        // A session a crash left open has no honest end, so it is dropped
+        // rather than closed at a guessed instant.
+        focusSessions: [
+          ...record.focusSessions.filter(session => session.endedAt !== undefined),
+          { id: sessionId, startedAt },
+        ],
+      }))
+      // The id travels back so the caller can close exactly this session
+      // instead of inferring "the open one" from the list it is shown.
+      return sessionId
+    },
+
+    endFocus: async (owner, id, sessionId) => {
+      const endedAt = now().toISOString()
+      await updateRegistry(owner, id, record => ({
+        ...record,
+        // Closing an unknown or already-closed session is a no-op, not a fault:
+        // a second window may have finished it already.
+        focusSessions: record.focusSessions.map(session =>
+          session.id === sessionId && session.endedAt === undefined ? { ...session, endedAt } : session),
+      }))
+    },
+
+    sweepOrphanAssets: async () => {
+      const referenced = new Set<string>()
+      for (const table of [tasks, media]) {
+        for (const [, record] of table.entries()) {
+          for (const material of record.materials) {
+            if (material.kind === 'image') referenced.add(material.assetId)
+          }
+        }
+      }
+      let removed = 0
+      for (const [assetId] of [...assets.entries()]) {
+        if (referenced.has(assetId)) continue
+        if (await assets.delete(assetId)) removed += 1
+      }
+      return removed
+    },
 
     newId: () => randomUUID(),
   }

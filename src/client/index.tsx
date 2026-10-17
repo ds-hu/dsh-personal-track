@@ -1,23 +1,27 @@
 /**
  * personal-track — browser half.
  *
- * Registers two surfaces: the `habit-board` page type in the right sidebar
- * (with its guide entry) and a `habit-stats` page in the main area, reachable
- * from the board and from a sidebar entry.
+ * Registers one surface: the `习惯看板` panel in the main area (with its
+ * sidebar entry), which holds both the day's board and the statistics view,
+ * plus focus mode over either of them.
  *
- * Both talk to the host through the command face injected into their slot
- * registration, so neither component ever sees `ctx`.
+ * The right-sidebar tab this plugin used to own is gone by decision: the board
+ * and the statistics were two halves of one question — "how is today going, and
+ * how has it been going" — and splitting them across two shells meant the
+ * board had to hand the user off through `ctx.layout`, which is exactly the
+ * kind of seam that breaks when one half reloads.
+ *
+ * The panel talks to the host through the command face injected into its slot
+ * registration, so the component never sees `ctx`.
  */
 import type { Context } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
-import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { createHabitClient } from './api.ts'
-import { BoardBody, BoardIcon } from './board/BoardBody.tsx'
-import { StatsIcon, StatsPanel } from './board/stats-panel.tsx'
+import { BoardIcon } from './board/BoardBody.tsx'
+import { TrackPanel } from './board/TrackPanel.tsx'
 import { ensureBoardStyles } from './styles.ts'
 
 /**
@@ -25,55 +29,26 @@ import { ensureBoardStyles } from './styles.ts'
  *
  * Every `ctx.<prop>` service access needs its name here — cordis resolves
  * service props through the fiber's inject set and throws
- * `cannot get property "prop" without inject` otherwise. `ctx.layout` backs
- * `openStats`, so it is required alongside the two registration faces.
+ * `cannot get property "prop" without inject` otherwise. Only the two
+ * registration faces are touched now, so the list is down to `slots`.
  */
-export const inject = ['slots', 'sidebarRightTabs', 'layout']
+export const inject = ['slots']
 
-/** Stable tab-type id; it keys the body slot registration. */
-const BOARD_ID = 'personal-track-board'
+/** The one main-area panel this plugin owns. */
+const PANEL_ID = 'personal-track-board' as MainPanelId
 
-/** The page kind opened by `ctx.sidebarRight.openTab('habit-board')`. */
-const BOARD_KIND = 'habit-board'
-
-/** The main-area panel that hosts the statistics. */
-const STATS_PANEL_ID = 'personal-track-stats' as MainPanelId
-
-/** Register the board tab type, its body, and the statistics panel. */
+/** Register the panel, its body, and the sidebar entry that opens it. */
 export function apply(ctx: Context): void {
   ensureBoardStyles()
   const client = createHabitClient()
 
-  ctx.effect(() => ctx.sidebarRightTabs.register({
-    id: BOARD_ID,
-    kind: BOARD_KIND,
-    title: () => '习惯看板',
-    guide: [{
-      order: 10,
-      title: () => '习惯看板',
-      description: () => '每日习惯打卡',
-      // Without one the guide draws its cube placeholder.
-      icon: BoardIcon,
-    }],
-  }), 'personal-track: board tab type')
-
-  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register(
-    {
-      name: 'sidebar.right.pane.tab',
-      key: BOARD_ID,
-      // The board also needs a way out of the sidebar, into the stats page.
-      inject: () => ({ client, openStats: () => ctx.layout.selectPanel(STATS_PANEL_ID) }),
-    },
-    BoardBody,
-  )), 'personal-track: board body')
-
   ctx.effect(() => ctx.slots.inject('main', () => ctx.slots.register(
-    { name: 'main', key: STATS_PANEL_ID, inject: () => ({ client }) },
-    StatsPanel,
-  )), 'personal-track: stats panel')
+    { name: 'main', key: PANEL_ID, inject: () => ({ client }) },
+    TrackPanel,
+  )), 'personal-track: board panel')
 
   ctx.effect(() => ctx.slots.inject('sidebar.panellist', () => ctx.slots.register(
-    { name: 'sidebar.panellist', id: STATS_PANEL_ID, order: 20, label: () => '习惯统计' },
-    StatsIcon,
-  )), 'personal-track: stats entry')
+    { name: 'sidebar.panellist', id: PANEL_ID, order: 20, label: () => '习惯看板' },
+    BoardIcon,
+  )), 'personal-track: sidebar entry')
 }

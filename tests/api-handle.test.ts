@@ -16,6 +16,8 @@
  */
 import { strict as assert } from 'node:assert'
 import { createChecker, createHarness } from './support.ts'
+import { MAX_IMAGE_BYTES } from '../src/shared/route.ts'
+import { MAX_MATERIAL_CHARS } from '../src/host/routes.ts'
 
 const checker = createChecker('route handling (portless)')
 const { check, checkAsync, report } = checker
@@ -352,6 +354,114 @@ await checkAsync('checkpoints travel as content and follow the progress over HTT
   assert.deepEqual(entryOf(emptied).checkpoints, [], 'an emptied list is the "remove them all"')
   const after = await api.call('PATCH', '/tasks', { id, patch: { progress: { total: null } } })
   assert.equal(after.status, 200, 'with the stages gone, the total may go too')
+})
+
+// --- materials and focus mode ------------------------------------------------
+
+/** One tiny PNG, base64: the smallest thing that is still an image payload. */
+const TINY_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+
+await checkAsync('an image travels as bytes and reads back as a binary response', async () => {
+  const api = createHarness()
+  const task = await api.state('POST', '/tasks', { title: '线代作业' })
+  const id = (task.entry as { id: string }).id
+
+  const added = await api.entry('POST', '/asset', {
+    kind: 'task', id, mime: 'image/png', data: TINY_PNG, name: '讲义.png',
+  })
+  const material = (added.materials as { kind: string; assetId: string; mime?: string; bytes?: number }[])[0]
+  assert.equal(material?.kind, 'image')
+  assert.equal(material?.mime, 'image/png', 'mime is derived from the asset document')
+  assert.equal(material?.bytes, Buffer.from(TINY_PNG, 'base64').length, 'and so is the size')
+
+  const fetched = await api.call('GET', `/asset?id=${material!.assetId}`)
+  assert.equal(fetched.status, 200)
+  assert.equal(fetched.contentType, 'image/png', 'the response carries the stored mime')
+  assert.deepEqual(fetched.bytes, Buffer.from(TINY_PNG, 'base64'), 'and the bytes it stored')
+  assert.equal(fetched.body.ok, undefined, 'a binary response is not a JSON envelope')
+})
+
+await checkAsync('a missing image is a 404, not an empty picture', async () => {
+  const api = createHarness()
+  const missing = await api.call('GET', '/asset?id=nope')
+  assert.equal(missing.status, 404)
+  assert.equal((missing.body as ErrorBody).error.code, 'habit/not-found')
+  const bare = await api.call('GET', '/asset')
+  assert.equal(bare.status, 400, 'the id is required')
+})
+
+await checkAsync('a payload that is not base64, or is over the wire cap, is refused', async () => {
+  const api = createHarness()
+  const task = await api.state('POST', '/tasks', { title: '作业' })
+  const id = (task.entry as { id: string }).id
+
+  const notBase64 = await api.call('POST', '/asset', { kind: 'task', id, mime: 'image/png', data: 'not base64!!' })
+  assert.equal(notBase64.status, 400)
+  assert.equal((notBase64.body as ErrorBody).error.code, 'habit/bad-request')
+
+  // One byte over the shared cap, encoded the way the browser half would.
+  const oversized = Buffer.alloc(MAX_IMAGE_BYTES + 1).toString('base64')
+  const tooBig = await api.call('POST', '/asset', { kind: 'task', id, mime: 'image/png', data: oversized })
+  assert.equal(tooBig.status, 400, 'the host enforces the same cap the picker does')
+
+  const unknownOwner = await api.call('POST', '/asset', { kind: 'task', id: 'nope', mime: 'image/png', data: TINY_PNG })
+  assert.equal(unknownOwner.status, 404, 'a material on a vanished entry is a missing key')
+})
+
+await checkAsync('text blocks are added, rewritten and removed over HTTP', async () => {
+  const api = createHarness()
+  const task = await api.state('POST', '/tasks', { title: '作业' })
+  const id = (task.entry as { id: string }).id
+
+  const first = await api.entry('POST', '/material', { kind: 'task', id, text: '## 第一块' })
+  const material = (first.materials as { id: string; text: string }[])[0]
+  assert.equal(material?.text, '## 第一块')
+
+  const patched = await api.entry('PATCH', '/material', {
+    kind: 'task', id, materialId: material!.id, text: '改过',
+  })
+  assert.equal((patched.materials as { text: string }[])[0]?.text, '改过')
+
+  const removed = await api.entry('DELETE', `/material?kind=task&id=${id}&materialId=${material!.id}`)
+  assert.deepEqual(removed.materials, [], 'the block is gone')
+
+  const tooLong = await api.call('POST', '/material', { kind: 'task', id, text: 'x'.repeat(MAX_MATERIAL_CHARS + 1) })
+  assert.equal(tooLong.status, 400, 'one block is bounded in characters, not bytes')
+})
+
+await checkAsync('focus sessions open, close, and answer with the entry', async () => {
+  const api = createHarness()
+  const task = await api.state('POST', '/tasks', { title: '作业' })
+  const id = (task.entry as { id: string }).id
+
+  const response = await api.call('POST', '/focus', { kind: 'task', id })
+  assert.equal(response.status, 200)
+  const sessionId = response.body.sessionId
+  assert.equal(typeof sessionId, 'string', 'the session just opened is named back')
+  const entry = response.body.entry as { focusSessions: { endedAt?: string }[]; focusSeconds: number }
+  assert.equal(entry.focusSessions.length, 1)
+  assert.equal(entry.focusSessions[0]?.endedAt, undefined, 'still open')
+  assert.equal(entry.focusSeconds, 0, 'an open session contributes no time')
+
+  const closed = await api.entry('PATCH', '/focus', { kind: 'task', id, sessionId })
+  const sessions = closed.focusSessions as { endedAt?: string }[]
+  assert.equal(typeof sessions[0]?.endedAt, 'string', 'closing stamps the end the host chose')
+  assert.equal(closed.focusSeconds, 0, 'the pinned clock makes the session zero-length')
+})
+
+await checkAsync('the sweep reclaims an orphan an interrupted write left behind', async () => {
+  const api = createHarness()
+  const task = await api.state('POST', '/tasks', { title: '作业' })
+  const id = (task.entry as { id: string }).id
+  const added = await api.entry('POST', '/asset', { kind: 'task', id, mime: 'image/png', data: TINY_PNG })
+  const material = (added.materials as { kind: string; id: string }[])[0]
+
+  const clean = await api.call('POST', '/asset/sweep')
+  assert.equal((clean.body as { removed: number }).removed, 0, 'a referenced image is not an orphan')
+
+  await api.entry('DELETE', `/material?kind=task&id=${id}&materialId=${material!.id}`)
+  const after = await api.call('POST', '/asset/sweep')
+  assert.equal((after.body as { removed: number }).removed, 0, 'removing a material already took its bytes')
 })
 
 // --- backup ------------------------------------------------------------------

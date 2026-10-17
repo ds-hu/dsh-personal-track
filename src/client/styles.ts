@@ -12,8 +12,8 @@
  * icon (a bare glyph that gains a surface on hover).
  */
 const CSS = `
-/* One palette shared by the sidebar board and the main-area statistics panel. */
-.pt-board, .pt-panel {
+/* One palette shared by the panel, the board and focus mode. */
+.pt-board, .pt-panel, .pt-track, .pt-fo {
   --pt-surface: rgba(127,127,127,.07);
   --pt-surface-2: rgba(127,127,127,.13);
   --pt-line: rgba(127,127,127,.18);
@@ -24,6 +24,9 @@ const CSS = `
   --pt-info: rgba(96,150,215,.3);
   --pt-info-soft: rgba(96,150,215,.15);
   --pt-info-line: rgba(96,150,215,.45);
+  --pt-red: rgba(232,96,96,.95);
+  --pt-red-soft: rgba(232,96,96,.14);
+  --pt-red-line: rgba(232,96,96,.45);
   font-size: 13px; line-height: 1.45;
 }
 .pt-board {
@@ -402,6 +405,323 @@ const CSS = `
 @media (max-width: 260px) {
   .pt-grid { grid-template-columns: minmax(0,1fr); }
   .pt-span-1, .pt-span-2 { grid-column: 1 / -1; }
+}
+
+/* ====================================================================== *
+ * The panel: 打卡 (focus column + board) and 统计
+ * ==================================================================== */
+/*
+ * The panel owns the main slot's height and hands the scroll region down: the
+ * board scrolls itself in the board view, the statistics panel scrolls itself
+ * in the statistics view. min-height:0 on both boxes is the load-bearing part —
+ * a flex item's automatic minimum size is its content, so without it the inner
+ * scrollers simply overflow the shell's clipping column.
+ */
+.pt-track { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.pt-track-head {
+  flex: none; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 12px 16px 10px;
+}
+.pt-track-head h2 { margin: 0; font-size: 15px; font-weight: 650; }
+.pt-track-body { flex: 1 1 auto; min-height: 0; display: flex; gap: 14px; }
+@media (max-width: 800px) {
+  .pt-track-body { flex-direction: column; }
+}
+
+/* ---- the focus column ------------------------------------------------ */
+.pt-focus-col {
+  flex: none; width: 300px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 9px;
+  margin: 0 0 12px 14px; padding: 13px 14px;
+  border: 1px solid var(--pt-line); border-radius: 14px; background: var(--pt-surface);
+}
+@media (max-width: 800px) {
+  .pt-focus-col { width: auto; margin: 0 14px 4px; }
+}
+.pt-focus-label { font-size: 11px; letter-spacing: .07em; opacity: .55; }
+.pt-focus-clock { font-size: 34px; font-weight: 250; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.pt-focus-date { font-size: 12px; opacity: .7; display: flex; align-items: center; gap: 6px; }
+.pt-night-badge {
+  border: 1px solid var(--pt-info-line); background: var(--pt-info-soft);
+  border-radius: 5px; padding: 0 5px; font-size: 10px;
+}
+.pt-focus-todo { font-size: 12px; opacity: .75; }
+.pt-focus-todo b { font-variant-numeric: tabular-nums; }
+
+.pt-focus-card {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 10px 11px; border: 1px solid var(--pt-line); border-radius: 12px;
+  background: var(--pt-surface-2);
+}
+.pt-focus-card-late { border-color: var(--pt-red-line); background: var(--pt-red-soft); }
+.pt-focus-card-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.pt-focus-title {
+  flex: 1; min-width: 0; font-size: 14px; font-weight: 650;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pt-focus-sub { font-size: 11px; opacity: .7; }
+.pt-focus-time { font-size: 12px; font-weight: 600; color: var(--pt-accent); font-variant-numeric: tabular-nums; }
+.pt-focus-actions { display: flex; gap: 6px; margin-top: 2px; }
+
+/* A title that opens focus mode reads as one. */
+.pt-row-open { cursor: pointer; }
+.pt-row-open:hover { color: var(--pt-accent); }
+
+/* ====================================================================== *
+ * Focus mode: one entry, full screen
+ * ==================================================================== */
+/*
+ * Deeper lines and a soft shadow inside the overlay: with no separator between
+ * the toolbar and the material stream, the depth has to come from the edges.
+ */
+.pt-fo {
+  --pt-surface: rgba(127,127,127,.10);
+  --pt-surface-2: rgba(127,127,127,.17);
+  --pt-line: rgba(127,127,127,.28);
+  --pt-line-strong: rgba(127,127,127,.46);
+  --pt-shadow: 0 1px 3px rgba(0,0,0,.24);
+  position: fixed; inset: 0; z-index: 400; display: flex; flex-direction: column;
+  background: rgba(10,12,14,.85); color: #e8ecef;
+  font-size: 13px; line-height: 1.45;
+}
+@media (prefers-color-scheme: light) {
+  .pt-fo { --pt-shadow: 0 1px 3px rgba(0,0,0,.07); background: rgba(244,245,246,.94); color: #1c1e21; }
+}
+.pt-fo-layout { flex: 1; min-height: 0; display: flex; }
+
+/* ---- left column: what it is, how long, and what you write ----------- */
+.pt-fo-left {
+  flex: none; width: 320px; min-height: 0;
+  display: flex; flex-direction: column; gap: 16px;
+  padding: 22px 18px 16px 22px;
+  border-right: 1px solid var(--pt-line);
+}
+.pt-fo-info { display: flex; flex-direction: column; gap: 9px; }
+.pt-fo-name { font-size: 19px; font-weight: 650; line-height: 1.45; overflow-wrap: anywhere; }
+.pt-fo-meta {
+  font-size: 12px; opacity: .8; display: flex; align-items: center; gap: 14px;
+  flex-wrap: wrap; line-height: 1.7;
+}
+.pt-fo-meta .pt-badge { opacity: 1; }
+.pt-fo-due { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+.pt-fo-timers {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 12px 0; border-top: 1px dashed var(--pt-line); text-align: center;
+}
+/* The session's own duration, with the running total on hover. */
+.pt-fo-stopwatch {
+  position: relative; width: fit-content; cursor: default;
+  font-size: 38px; font-weight: 500; line-height: 1.05;
+  font-variant-numeric: tabular-nums; color: var(--pt-accent);
+  border-bottom: 1px dotted transparent;
+}
+.pt-fo-stopwatch:hover, .pt-fo-stopwatch:focus-visible {
+  border-bottom-color: var(--pt-accent-line); outline: none;
+}
+.pt-fo-stopwatch::after {
+  content: attr(data-tip);
+  position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%);
+  z-index: 5; white-space: nowrap; font-size: 11px; font-weight: 400; color: inherit;
+  background: var(--pt-surface-2); border: 1px solid var(--pt-line-strong);
+  border-radius: 7px; padding: 3px 8px;
+  opacity: 0; pointer-events: none; transition: opacity .12s ease;
+}
+.pt-fo-stopwatch:hover::after, .pt-fo-stopwatch:focus-visible::after { opacity: 1; }
+.pt-fo-now { font-size: 12px; opacity: .6; font-variant-numeric: tabular-nums; }
+
+.pt-fo-notes { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 7px; }
+.pt-fo-notes-head { display: flex; align-items: baseline; gap: 8px; font-size: 12px; font-weight: 600; }
+.pt-fo-save { margin-left: auto; font-size: 11px; font-weight: 400; opacity: .6; }
+.pt-fo-save-saving { opacity: 1; color: rgb(232,150,72); }
+.pt-fo-save-saved { opacity: .8; color: var(--pt-accent); }
+.pt-fo-save-error { opacity: 1; color: var(--pt-red); }
+.pt-fo-textarea {
+  flex: 1; min-height: 120px; width: 100%; resize: none; outline: none;
+  border: 1px solid var(--pt-line-strong); border-radius: 10px;
+  background: var(--pt-surface-2); color: inherit; padding: 10px 12px;
+  font: inherit; font-size: 13px; line-height: 1.7;
+  transition: border-color .12s ease;
+}
+.pt-fo-textarea:focus { border-color: var(--pt-info-line); }
+
+/* ---- right column: a slim toolbar, then the material stream ---------- */
+.pt-fo-right { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* Progress takes everything the control column does not; no rule between the
+   two regions, so the depth comes from the cards below instead. */
+.pt-fo-toolbar {
+  flex: none; display: flex; align-items: center; gap: 14px;
+  padding: 12px 16px 14px;
+}
+.pt-fo-progress {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; justify-content: center; gap: 7px;
+}
+.pt-fo-progress-row { display: flex; align-items: center; justify-content: center; gap: 10px; min-width: 0; }
+.pt-fo-progress-label { flex: none; font-size: 12px; opacity: .6; }
+.pt-fo-bar {
+  appearance: none; position: relative; flex: 1 1 auto; min-width: 80px; max-width: 420px;
+  height: 10px; padding: 0; border: 1px solid var(--pt-line); border-radius: 5px;
+  background: var(--pt-surface-2); overflow: visible; cursor: grab; touch-action: none;
+}
+.pt-fo-bar:hover, .pt-fo-bar:focus-visible { border-color: var(--pt-line-strong); outline: none; }
+.pt-fo-bar-active { cursor: grabbing; }
+.pt-fo-fill {
+  display: block; height: 100%; border-radius: 4px;
+  background: linear-gradient(90deg, rgba(90,175,120,.8), rgba(130,205,155,.95));
+  transition: width .18s ease;
+}
+.pt-fo-bar-active .pt-fo-fill { transition: none; }
+.pt-fo-thumb {
+  position: absolute; top: 50%; width: 14px; height: 14px; border-radius: 50%;
+  transform: translate(-50%,-50%); pointer-events: none;
+  border: 1px solid rgba(64,146,98,1); background: var(--pt-accent);
+}
+.pt-fo-tick {
+  position: absolute; top: 50%; width: 2px; height: 14px; border-radius: 1px;
+  transform: translate(-50%,-50%); background: var(--pt-line-strong); opacity: .5;
+  pointer-events: none;
+}
+.pt-fo-tick-ok { background: rgba(64,146,98,1); opacity: 1; }
+.pt-fo-reading { flex: none; min-width: 4.5ch; text-align: right; font-size: 15px; font-weight: 250; font-variant-numeric: tabular-nums; }
+.pt-fo-reading b { font-weight: 650; }
+.pt-fo-checkpoints { display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; }
+.pt-fo-cp {
+  appearance: none; display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+  border: 1px solid var(--pt-line); border-radius: 999px; background: transparent; color: inherit;
+  padding: 2px 10px; font: inherit; font-size: 11px; opacity: .7;
+  font-variant-numeric: tabular-nums;
+  transition: background .12s ease, opacity .12s ease;
+}
+.pt-fo-cp:hover:not(:disabled) { opacity: 1; background: var(--pt-surface-2); }
+.pt-fo-cp:disabled { cursor: default; opacity: .5; }
+.pt-fo-cp-ok { border-color: var(--pt-accent-line); background: var(--pt-accent-soft); opacity: 1; }
+.pt-fo-cp-ok .pt-fo-dot { background: var(--pt-accent); }
+.pt-fo-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--pt-line-strong); }
+
+.pt-fo-controls { flex: none; display: flex; flex-direction: column; gap: 6px; }
+.pt-fo-ctl {
+  appearance: none; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  min-width: 108px; padding: 9px 12px; cursor: pointer; white-space: nowrap;
+  border: 1px solid var(--pt-line); border-radius: 10px;
+  background: var(--pt-surface); color: inherit; box-shadow: var(--pt-shadow);
+  font: inherit; font-size: 12px; opacity: .88;
+  transition: background .12s ease, border-color .12s ease, opacity .12s ease;
+}
+.pt-fo-ctl:hover { background: var(--pt-surface-2); border-color: var(--pt-line-strong); opacity: 1; }
+.pt-fo-ctl-icon { font-size: 13px; line-height: 1; }
+.pt-fo-ctl-danger:hover { background: var(--pt-red-soft); border-color: var(--pt-red-line); }
+
+.pt-fo-materials { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 18px 70px; }
+.pt-fo-mat-col { max-width: 820px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+.pt-fo-mat-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pt-fo-mat-title { font-size: 12px; font-weight: 600; }
+.pt-fo-mat-meta { font-size: 11px; opacity: .55; font-variant-numeric: tabular-nums; }
+.pt-fo-mat-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.pt-fo-drop {
+  border: 1px dashed var(--pt-line-strong); border-radius: 10px;
+  padding: 9px 12px; text-align: center; font-size: 12px; opacity: .6;
+  transition: border-color .12s ease, background .12s ease, opacity .12s ease;
+}
+.pt-fo-dropping .pt-fo-drop { border-color: var(--pt-accent); background: var(--pt-accent-soft); opacity: 1; }
+.pt-fo-list { display: flex; flex-direction: column; gap: 12px; }
+
+/* ---- material: a Markdown block -------------------------------------- */
+.pt-fo-md {
+  overflow: hidden; border: 1px solid var(--pt-line); border-radius: 12px;
+  background: var(--pt-surface); box-shadow: var(--pt-shadow);
+}
+.pt-fo-md-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 10px; border-bottom: 1px solid var(--pt-line); font-size: 11px;
+}
+.pt-fo-md-edit {
+  width: 100%; min-height: 130px; resize: vertical; outline: none; border: 0;
+  background: var(--pt-surface-2); color: inherit; padding: 10px 14px;
+  font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; line-height: 1.7;
+}
+.pt-md { padding: 10px 14px; font-size: 13px; line-height: 1.75; }
+.pt-md h3, .pt-md h4, .pt-md h5 { margin: .7em 0 .3em; line-height: 1.35; }
+.pt-md h3 { font-size: 16px; }
+.pt-md h4 { font-size: 14px; }
+.pt-md h5 { font-size: 13px; }
+.pt-md p { margin: .35em 0; }
+.pt-md ul, .pt-md ol { margin: .35em 0; padding-left: 1.5em; }
+.pt-md blockquote {
+  margin: .5em 0; padding: 2px 12px; border-left: 3px solid var(--pt-accent-line);
+  background: var(--pt-accent-soft); border-radius: 0 8px 8px 0;
+}
+.pt-md blockquote p { margin: .2em 0; }
+.pt-md code {
+  border: 1px solid var(--pt-line); border-radius: 4px; background: var(--pt-surface-2);
+  padding: 0 4px; font-size: .92em;
+}
+.pt-md pre { margin: .5em 0; }
+.pt-md pre code { display: block; padding: 8px 10px; overflow-x: auto; }
+.pt-md a { color: inherit; }
+
+/* ---- material: an image --------------------------------------------- */
+.pt-fo-img-wrap { position: relative; }
+.pt-fo-img {
+  display: block; width: 100%; border-radius: 10px; cursor: zoom-in;
+  border: 1px solid var(--pt-line); background: var(--pt-surface-2);
+  box-shadow: var(--pt-shadow);
+}
+.pt-fo-img-full { width: auto; max-width: none; cursor: zoom-out; }
+.pt-fo-img-scroller { overflow: auto; max-height: 74vh; border-radius: 10px; }
+.pt-fo-img-del {
+  position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--pt-line); border-radius: 8px; font: inherit; font-size: 13px;
+  background: rgba(20,22,25,.65); color: #eee; opacity: 0;
+  backdrop-filter: blur(4px);
+  transition: opacity .12s ease, background .12s ease;
+}
+@media (prefers-color-scheme: light) {
+  .pt-fo-img-del { background: rgba(250,250,250,.78); color: #222; }
+}
+.pt-fo-img-wrap:hover .pt-fo-img-del { opacity: 1; }
+.pt-fo-img-del:hover { background: var(--pt-red-soft); border-color: var(--pt-red-line); }
+/* A material whose bytes are gone: named, and removable, but not drawn. */
+.pt-fo-img-missing {
+  display: flex; align-items: center; gap: 10px;
+  border: 1px dashed var(--pt-red-line); border-radius: 10px;
+  background: var(--pt-red-soft); padding: 10px 12px; font-size: 12px;
+}
+.pt-fo-img-missing .pt-muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- focus mode on a phone: one column, one scroll, sticky toolbar ---- */
+@media (max-width: 720px) {
+  .pt-fo-layout { flex-direction: column; overflow-y: auto; }
+  .pt-fo-left {
+    width: auto; gap: 8px; padding: 12px 14px 10px;
+    border-right: 0; border-bottom: 1px solid var(--pt-line);
+  }
+  .pt-fo-info { gap: 6px; }
+  .pt-fo-name { font-size: 17px; line-height: 1.4; }
+  .pt-fo-timers { flex-direction: row; justify-content: center; align-items: baseline; gap: 10px; padding: 6px 0; }
+  .pt-fo-stopwatch { font-size: 28px; }
+  .pt-fo-notes { flex: none; }
+  .pt-fo-textarea { min-height: 90px; max-height: 40vh; resize: vertical; }
+  .pt-fo-right { flex: none; }
+  /* Sticky: progress and both controls stay reachable down a long screenshot. */
+  .pt-fo-toolbar {
+    position: sticky; top: 0; z-index: 4; gap: 8px; padding: 8px 10px;
+    background: rgba(14,16,19,.92); backdrop-filter: blur(10px);
+  }
+  @media (prefers-color-scheme: light) {
+    .pt-fo-toolbar { background: rgba(244,245,246,.94); }
+  }
+  .pt-fo-progress-label { font-size: 11px; }
+  .pt-fo-progress-row { gap: 7px; }
+  .pt-fo-bar { max-width: none; }
+  .pt-fo-reading { font-size: 13px; min-width: 4ch; }
+  .pt-fo-checkpoints { overflow-x: auto; flex-wrap: nowrap; justify-content: flex-start; }
+  .pt-fo-ctl { min-width: 84px; gap: 5px; padding: 7px 8px; font-size: 11px; }
+  .pt-fo-materials { overflow: visible; padding: 12px 12px 60px; }
+  .pt-fo-img-scroller { max-height: 62vh; }
+  .pt-fo-mat-actions { width: 100%; }
+  .pt-fo-mat-actions .pt-primary, .pt-fo-mat-actions .pt-ghost { flex: 1; padding: 7px 8px; }
 }
 `
 

@@ -143,6 +143,44 @@ export interface Stock {
   readonly updatedAt: string
 }
 
+/** One focus session, as the wire carries it: instants only. */
+export interface FocusSession {
+  readonly id: string
+  readonly startedAt: string
+  /** Absent only while the session is open. */
+  readonly endedAt?: string
+}
+
+/** A Markdown text block among an entry's materials. */
+export interface MaterialText {
+  readonly kind: 'md'
+  readonly id: string
+  readonly text: string
+}
+
+/**
+ * A pasted image among an entry's materials.
+ *
+ * `mime` and `bytes` are derived by the host from the asset document; both are
+ * absent when the asset itself is missing, which the board draws as a missing
+ * material rather than as an empty image.
+ */
+export interface MaterialImage {
+  readonly kind: 'image'
+  readonly id: string
+  readonly assetId: string
+  readonly name?: string
+  readonly createdAt: string
+  readonly mime?: string
+  readonly bytes?: number
+}
+
+/** One material: text or image, in the order they were added. */
+export type Material = MaterialText | MaterialImage
+
+/** Which registry a material or focus session belongs to. */
+export type RegistryKind = 'task' | 'media'
+
 /** One media log entry. */
 export interface MediaEntry {
   readonly id: string
@@ -154,6 +192,10 @@ export interface MediaEntry {
   readonly finishedAt?: string
   readonly notes?: string
   readonly createdAt: string
+  readonly materials: readonly Material[]
+  readonly focusSessions: readonly FocusSession[]
+  /** Derived: seconds focused on this entry, closed sessions only. */
+  readonly focusSeconds: number
 }
 
 /** A task's lifecycle state, derived by the host from its progress. */
@@ -185,6 +227,10 @@ export interface TaskEntry {
   readonly completedAt?: string
   readonly notes?: string
   readonly createdAt: string
+  readonly materials: readonly Material[]
+  readonly focusSessions: readonly FocusSession[]
+  /** Derived: seconds focused on this entry, closed sessions only. */
+  readonly focusSeconds: number
   /** Derived: 待办 / 进行中 / 完成. */
   readonly state: TaskState
   /** Derived: past its due date and not finished. */
@@ -192,15 +238,19 @@ export interface TaskEntry {
 }
 
 /** A task as a backup file carries it: the stored record, without the states
- *  the host derives for the live view. */
-export type TaskRecordWire = Omit<TaskEntry, 'state' | 'overdue'>
+ *  and derived totals the host computes for the live view. */
+export type TaskRecordWire = Omit<TaskEntry, 'state' | 'overdue' | 'focusSeconds'>
+
+/** A media entry as a backup file carries it: stored facts only. */
+export type MediaRecordWire = Omit<MediaEntry, 'focusSeconds'>
 
 /** How an import treats what is already stored. */
 export type ImportMode = 'merge' | 'replace'
 
 /**
  * One backup file: stored facts only. Nothing derived (cells, ratios, streaks,
- * overdue flags) is in here, so a restored file cannot contradict itself.
+ * overdue flags, focus durations, image sizes) is in here, so a restored file
+ * cannot contradict itself.
  */
 export interface BackupBundle {
   readonly format: string
@@ -208,8 +258,19 @@ export interface BackupBundle {
   readonly exportedAt: string
   readonly days: readonly DayRecord[]
   readonly counters: Readonly<Record<string, Stock>>
-  readonly media: readonly MediaEntry[]
+  readonly media: readonly MediaRecordWire[]
   readonly tasks: readonly TaskRecordWire[]
+  /** Material image bytes; absent in a version 1 file, which carries none. */
+  readonly assets?: readonly AssetBundleEntry[]
+}
+
+/** One image inside a backup file: the bytes travel with the file. */
+export interface AssetBundleEntry {
+  readonly id: string
+  readonly mime: string
+  /** Base64 payload. */
+  readonly data: string
+  readonly createdAt: string
 }
 
 /** What one import did. */
@@ -219,6 +280,7 @@ export interface ImportReport {
   readonly media: number
   readonly tasks: number
   readonly counters: number
+  readonly assets: number
   /** Records dropped because `replace` cleared keys the file did not carry. */
   readonly removed: number
 }
@@ -346,5 +408,10 @@ export interface StatsView {
     readonly open: number
     readonly doing: number
     readonly overdue: number
+  }
+  /** Focus time over both registries: closed sessions that started in range. */
+  readonly focus: {
+    readonly seconds: number
+    readonly sessions: number
   }
 }
