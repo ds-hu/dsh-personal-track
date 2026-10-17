@@ -4,6 +4,7 @@ DeepSeek Harness（DSH）插件：**一个主面板「习惯看板」**，内含
 
 - 领域语言：[CONTEXT.md](./CONTEXT.md) —— 五形态（打卡/计数器/槽位/会话/登记）、习惯日与夜段、目标、格、任务进度、专注会话与素材
 - 决策记录：[docs/adr/](./docs/adr/) —— 传输选型、状态派生不落库、图片存域内 base64
+- 变更记录：[CHANGELOG.md](./CHANGELOG.md) —— 每个版本的新增 / 变更 / 移除 / 修正
 - 上游插件开发文档快照：`.dsh-docs/`（git 忽略）
 
 ## 功能
