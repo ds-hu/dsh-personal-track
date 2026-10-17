@@ -37,6 +37,9 @@
     --pt-orange: rgba(232,150,72,.95);
     --pt-yellow: rgba(214,190,86,.95);
   }
+  /* 全局 border-box 是 demo 与实现的一处**故意不同**：真插件样式表没有这一条
+     （外壳只在组件内逐条重置），所以实现里每个 width:100% + padding/border 的
+     盒子都必须自己写 box-sizing —— 笔记框正是漏了它才横跨了专注模式的分界线。 */
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
@@ -97,10 +100,13 @@
   .focus-col {
     flex: none; width: 300px; position: sticky; top: 14px;
     display: flex; flex-direction: column; gap: 10px;
-    padding: 13px 14px; border: 1px solid var(--pt-line); border-radius: 14px;
+    padding: 13px 14px; border: 1px solid var(--pt-line-strong); border-radius: 14px;
     background: var(--pt-surface);
   }
   @media (max-width: 800px) { .focus-col { width: auto; position: static; } }
+  /* 手机宽度下这一栏没地方待，只会把看板往下推：专注模式从任意条目进入，置顶
+     也照旧保留，所以宁可不显示，而不是叠在看板上方占一行高。 */
+  @media (max-width: 720px) { .focus-col { display: none; } }
   .focus-label { font-size: 11px; letter-spacing: .07em; opacity: .55; }
   .focus-clock { font-size: 34px; font-weight: 250; line-height: 1.05; font-variant-numeric: tabular-nums; }
   .focus-date { font-size: 12px; opacity: .7; display: flex; align-items: center; gap: 6px; }
@@ -201,24 +207,37 @@
   /* ==================================================================== *
    * 专注模式（v2）：左信息列 + 右工具条与素材流
    * ==================================================================== */
+  /*
+   * 全屏层是**不透明**的：它盖住的正是看板本身，半透明会让整个屏幕底下的内容
+   * 一直可读，与专注模式的用意相反。demo 早先靠 rgba + blur 蒙混过去，只是因为
+   * demo 自己的页面底色和那层色几乎一样。
+   *
+   * 两处与实现**故意不同**，不要把 demo 当成规格反过来改实现：
+   *   1. demo 没有外壳，它的页面就是「外壳」——所以这里用 prefers-color-scheme
+   *      判深浅（系统偏好即主题源）。真实现取外壳令牌 --dsw-alias-bg-base /
+   *      --dsw-alias-label-primary，深浅由 body[data-ds-dark-theme] 判定。
+   *   2. demo 顶部有一条全局 * { box-sizing: border-box } 重置，实现没有
+   *      ——外壳只在组件内逐条重置，所以实现里每个 width:100% + padding/border
+   *      的盒子都要自己写 border-box。
+   */
   .focus-overlay {
     /* 层次感：全屏内的线比看板显眼一档，卡片再多一层浅阴影；
        去掉中部分隔线之后，靠这两样把「层」分开。 */
     --pt-surface: rgba(127,127,127,.10);
     --pt-surface-2: rgba(127,127,127,.17);
-    --pt-line: rgba(127,127,127,.28);
-    --pt-line-strong: rgba(127,127,127,.46);
+    --pt-line: rgba(127,127,127,.34);
+    --pt-line-strong: rgba(127,127,127,.56);
     --fo-shadow: 0 1px 3px rgba(0,0,0,.24);
     position: fixed; inset: 0; z-index: 2147483000;
     display: flex; flex-direction: column;
-    background: rgba(10, 12, 14, .82); backdrop-filter: blur(14px);
+    background: #101215;
     color: #e8ecef;
     animation: fo-in .18s ease;
   }
   @media (prefers-color-scheme: light) {
     .focus-overlay {
       --fo-shadow: 0 1px 3px rgba(0,0,0,.07);
-      background: rgba(244, 245, 246, .9); color: #1c1e21;
+      background: #f4f5f6; color: #1c1e21;
     }
   }
   @keyframes fo-in { from { opacity: 0; } to { opacity: 1; } }
@@ -226,10 +245,11 @@
   .fo-layout { flex: 1; min-height: 0; display: flex; }
 
   /* ---- 左列：信息 + 计时 + 笔记（窄） ---------------------------------- */
+  /* 两列之间是这里唯一的结构线，用重一档的色，卡片仍用浅色。 */
   .fo-left {
     flex: none; width: 320px; display: flex; flex-direction: column;
     padding: 22px 18px 16px 22px; gap: 16px;
-    border-right: 1px solid var(--pt-line);
+    border-right: 1px solid var(--pt-line-strong);
     min-height: 0;
   }
   /* 标题、学科、DDL 三者各自成行，行距放宽，不挤成一团。 */
@@ -390,7 +410,7 @@
   @media (max-width: 720px) {
     .fo-layout { flex-direction: column; overflow-y: auto; }
     .fo-left {
-      width: auto; border-right: 0; border-bottom: 1px solid var(--pt-line);
+      width: auto; border-right: 0; border-bottom: 1px solid var(--pt-line-strong);
       padding: 12px 14px 10px; gap: 8px;
     }
     .fo-name { font-size: 17px; line-height: 1.4; }
@@ -400,10 +420,12 @@
     .fo-notes-card { flex: none; }
     .fo-notes { min-height: 90px; max-height: 40vh; resize: vertical; }
     .fo-right { flex: none; }
-    /* 工具条吸顶：进度与两个控制按钮在长素材里始终可及 */
+    /* 工具条吸顶：进度与两个控制按钮在长素材里始终可及。
+       底色跟整层一样不透明——不透明的屏幕上盖一条半透明只会把底下的素材抹糊
+       ——也因此需要一条收边，桌面版工具条不吸顶就用不着。 */
     .fo-toolbar {
       position: sticky; top: 0; z-index: 4;
-      background: rgba(14,16,19,.92); backdrop-filter: blur(10px);
+      background: #101215; border-bottom: 1px solid var(--pt-line);
       padding: 8px 10px; gap: 8px;
     }
     .fo-progress-label { font-size: 11px; }
@@ -421,7 +443,7 @@
     .fo-mat-actions .pt-primary, .fo-mat-actions .pt-ghost { flex: 1; padding: 7px 8px; }
   }
   @media (max-width: 720px) and (prefers-color-scheme: light) {
-    .fo-toolbar { background: rgba(244,245,246,.94); }
+    .fo-toolbar { background: #f4f5f6; }
   }
 
   /* toast */

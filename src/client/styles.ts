@@ -433,10 +433,20 @@ const CSS = `
   flex: none; width: 300px; overflow-y: auto;
   display: flex; flex-direction: column; gap: 9px;
   margin: 0 0 12px 14px; padding: 13px 14px;
-  border: 1px solid var(--pt-line); border-radius: 14px; background: var(--pt-surface);
+  border: 1px solid var(--pt-line-strong); border-radius: 14px; background: var(--pt-surface);
 }
 @media (max-width: 800px) {
   .pt-focus-col { width: auto; margin: 0 14px 4px; }
+}
+/*
+ * On a phone the column has nowhere to sit beside the board, so it only pushes
+ * the board down. Focus mode is still one tap away — any row's title, or its ⤢
+ * — and the pinned item stays pinned, so the column is dropped rather than
+ * stacked. display:none takes it out of the flex row entirely, so the stack
+ * closes up with no gap where it was.
+ */
+@media (max-width: 720px) {
+  .pt-focus-col { display: none; }
 }
 .pt-focus-label { font-size: 11px; letter-spacing: .07em; opacity: .55; }
 .pt-focus-clock { font-size: 34px; font-weight: 250; line-height: 1.05; font-variant-numeric: tabular-nums; }
@@ -473,28 +483,64 @@ const CSS = `
 /*
  * Deeper lines and a soft shadow inside the overlay: with no separator between
  * the toolbar and the material stream, the depth has to come from the edges.
+ *
+ * The overlay is **opaque**, and it takes its two colours from the shell's own
+ * theme tokens rather than from a palette of its own. A translucent screen was
+ * the wrong idea: the board behind it stayed legible through the whole surface,
+ * which is the opposite of the mode's purpose. The demo got away with it only
+ * because its own page was the same dark colour.
+ *
+ * body[data-ds-dark-theme], not prefers-color-scheme, is what flips them: the
+ * tokens live on body, and that attribute is the shell's own switch for them
+ * (bare body is the light set). Keying off the OS preference instead paints the
+ * wrong theme whenever the shell theme and the OS disagree — which is what this
+ * rule did before. The literals inside var() are the fallback for a shell that
+ * renames or drops a token: still opaque, still readable, still the right
+ * polarity.
+ *
+ * --pt-fo-bg is bg-base (what the shell paints the page with), not a raised
+ * layer: a full screen should read as the app with everything else gone, not as
+ * one enormous card.
  */
 .pt-fo {
+  --pt-fo-bg: var(--dsw-alias-bg-base, #fff);
+  --pt-fo-fg: var(--dsw-alias-label-primary, #1c1e21);
+  /* The delete button floats on a photograph: it stays translucent on purpose. */
+  --pt-fo-chip-bg: rgba(250,250,250,.78);
+  --pt-fo-chip-fg: #222;
   --pt-surface: rgba(127,127,127,.10);
   --pt-surface-2: rgba(127,127,127,.17);
-  --pt-line: rgba(127,127,127,.28);
-  --pt-line-strong: rgba(127,127,127,.46);
-  --pt-shadow: 0 1px 3px rgba(0,0,0,.24);
+  --pt-line: rgba(127,127,127,.34);
+  --pt-line-strong: rgba(127,127,127,.56);
+  --pt-shadow: 0 1px 3px rgba(0,0,0,.08);
   position: fixed; inset: 0; z-index: 400; display: flex; flex-direction: column;
-  background: rgba(10,12,14,.85); color: #e8ecef;
+  background: var(--pt-fo-bg); color: var(--pt-fo-fg);
   font-size: 13px; line-height: 1.45;
 }
-@media (prefers-color-scheme: light) {
-  .pt-fo { --pt-shadow: 0 1px 3px rgba(0,0,0,.07); background: rgba(244,245,246,.94); color: #1c1e21; }
+/*
+ * A theme swap lives here, once, as variables — never as a property on the
+ * element itself. body[data-ds-dark-theme] .pt-fo-img-del would outrank
+ * .pt-fo-img-del:hover and kill the hover colour, since the attribute adds a
+ * class-level component to the specificity. Inheriting the value instead keeps
+ * every later state rule in charge of what it changes.
+ */
+body[data-ds-dark-theme] .pt-fo {
+  --pt-fo-bg: var(--dsw-alias-bg-base, #151517);
+  --pt-fo-fg: var(--dsw-alias-label-primary, #f9fafb);
+  --pt-fo-chip-bg: rgba(20,22,25,.65);
+  --pt-fo-chip-fg: #eee;
+  --pt-shadow: 0 1px 3px rgba(0,0,0,.24);
 }
 .pt-fo-layout { flex: 1; min-height: 0; display: flex; }
 
 /* ---- left column: what it is, how long, and what you write ----------- */
+/* The split between the two columns is the one structural line in here, so it
+   is drawn in the heavy weight while the cards keep the light one. */
 .pt-fo-left {
   flex: none; width: 320px; min-height: 0;
   display: flex; flex-direction: column; gap: 16px;
   padding: 22px 18px 16px 22px;
-  border-right: 1px solid var(--pt-line);
+  border-right: 1px solid var(--pt-line-strong);
 }
 .pt-fo-info { display: flex; flex-direction: column; gap: 9px; }
 .pt-fo-name { font-size: 19px; font-weight: 650; line-height: 1.45; overflow-wrap: anywhere; }
@@ -536,7 +582,19 @@ const CSS = `
 .pt-fo-save-saving { opacity: 1; color: rgb(232,150,72); }
 .pt-fo-save-saved { opacity: .8; color: var(--pt-accent); }
 .pt-fo-save-error { opacity: 1; color: var(--pt-red); }
+/*
+ * box-sizing: border-box is load-bearing here, not decoration.
+ *
+ * The shell resets border-box per component and never globally (its own
+ * stylesheet has no universal selector), so a width:100% box that also carries
+ * padding or a border is wider than the column it sits in. With content-box
+ * sizing this textarea measured 26px over its container's content box and
+ * painted straight across the left column's border — the notes visibly crossing
+ * the divider. The demo never showed it because the demo does have a global
+ * reset; verify-client now asserts this shape for the whole sheet.
+ */
 .pt-fo-textarea {
+  box-sizing: border-box;
   flex: 1; min-height: 120px; width: 100%; resize: none; outline: none;
   border: 1px solid var(--pt-line-strong); border-radius: 10px;
   background: var(--pt-surface-2); color: inherit; padding: 10px 12px;
@@ -635,7 +693,10 @@ const CSS = `
   display: flex; align-items: center; gap: 6px;
   padding: 5px 10px; border-bottom: 1px solid var(--pt-line); font-size: 11px;
 }
+/* Same width:100%-plus-padding shape as the notes box: without border-box this
+   overruns the card by 28px and is only hidden by the card's own clip. */
 .pt-fo-md-edit {
+  box-sizing: border-box;
   width: 100%; min-height: 130px; resize: vertical; outline: none; border: 0;
   background: var(--pt-surface-2); color: inherit; padding: 10px 14px;
   font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; line-height: 1.7;
@@ -663,22 +724,20 @@ const CSS = `
 /* ---- material: an image --------------------------------------------- */
 .pt-fo-img-wrap { position: relative; }
 .pt-fo-img {
+  box-sizing: border-box;
   display: block; width: 100%; border-radius: 10px; cursor: zoom-in;
   border: 1px solid var(--pt-line); background: var(--pt-surface-2);
   box-shadow: var(--pt-shadow);
 }
-.pt-fo-img-full { width: auto; max-width: none; cursor: zoom-out; }
+.pt-fo-img-full { box-sizing: content-box; width: auto; max-width: none; cursor: zoom-out; }
 .pt-fo-img-scroller { overflow: auto; max-height: 74vh; border-radius: 10px; }
 .pt-fo-img-del {
   position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid var(--pt-line); border-radius: 8px; font: inherit; font-size: 13px;
-  background: rgba(20,22,25,.65); color: #eee; opacity: 0;
+  background: var(--pt-fo-chip-bg); color: var(--pt-fo-chip-fg); opacity: 0;
   backdrop-filter: blur(4px);
   transition: opacity .12s ease, background .12s ease;
-}
-@media (prefers-color-scheme: light) {
-  .pt-fo-img-del { background: rgba(250,250,250,.78); color: #222; }
 }
 .pt-fo-img-wrap:hover .pt-fo-img-del { opacity: 1; }
 .pt-fo-img-del:hover { background: var(--pt-red-soft); border-color: var(--pt-red-line); }
@@ -695,7 +754,7 @@ const CSS = `
   .pt-fo-layout { flex-direction: column; overflow-y: auto; }
   .pt-fo-left {
     width: auto; gap: 8px; padding: 12px 14px 10px;
-    border-right: 0; border-bottom: 1px solid var(--pt-line);
+    border-right: 0; border-bottom: 1px solid var(--pt-line-strong);
   }
   .pt-fo-info { gap: 6px; }
   .pt-fo-name { font-size: 17px; line-height: 1.4; }
@@ -704,13 +763,13 @@ const CSS = `
   .pt-fo-notes { flex: none; }
   .pt-fo-textarea { min-height: 90px; max-height: 40vh; resize: vertical; }
   .pt-fo-right { flex: none; }
-  /* Sticky: progress and both controls stay reachable down a long screenshot. */
+  /* Sticky: progress and both controls stay reachable down a long screenshot.
+     Opaque like the screen it sits on — a translucent bar over an opaque one
+     just smears the material underneath it — and it needs the hairline the
+     desktop toolbar does without, now that material scrolls beneath it. */
   .pt-fo-toolbar {
     position: sticky; top: 0; z-index: 4; gap: 8px; padding: 8px 10px;
-    background: rgba(14,16,19,.92); backdrop-filter: blur(10px);
-  }
-  @media (prefers-color-scheme: light) {
-    .pt-fo-toolbar { background: rgba(244,245,246,.94); }
+    background: var(--pt-fo-bg); border-bottom: 1px solid var(--pt-line);
   }
   .pt-fo-progress-label { font-size: 11px; }
   .pt-fo-progress-row { gap: 7px; }

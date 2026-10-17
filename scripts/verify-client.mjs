@@ -162,4 +162,93 @@ const materialBodies = bodiesFor('.pt-fo-materials')
 assert.ok(materialBodies.length > 0, 'the stylesheet declares .pt-fo-materials')
 assert.ok(materialBodies.some(body => /overflow-y:\s*auto/.test(body)), '.pt-fo-materials scrolls the material stream')
 
+// Focus mode is opaque, and it takes its colours from the shell's own theme
+// tokens rather than a palette of its own. Translucency was the bug: the board
+// behind the overlay stayed legible through the whole screen. The demo hid the
+// same mistake because its page was the same dark colour the overlay tinted to.
+//
+// The surface must be a token with an opaque literal fallback, so a shell that
+// renames one still paints an opaque screen in the right polarity.
+const overlayBodies = [...bodiesFor('.pt-fo'), ...bodiesFor('body[data-ds-dark-theme] .pt-fo')]
+const surfaces = overlayBodies
+  .flatMap(body => [...body.matchAll(/--pt-fo-bg\s*:\s*([^;]+)/g)].map(([, value]) => value.trim()))
+assert.equal(surfaces.length, 2, 'both shell themes define the overlay surface colour')
+for (const value of surfaces) {
+  assert.ok(
+    /^var\(--dsw-alias-bg-base,\s*#[0-9a-f]{3,8}\)$/i.test(value),
+    `the overlay surface is a shell token with an opaque literal fallback (${value})`,
+  )
+}
+assert.ok(
+  overlayBodies.some(body => /background:\s*var\(--pt-fo-bg\)/.test(body)),
+  '.pt-fo paints that opaque surface',
+)
+
+// Colour follows the shell's signal, never the OS preference. The two disagree
+// on any machine whose shell theme is not its system theme, and the overlay then
+// paints the wrong polarity — the literals above are a token fallback, not a
+// second opinion about which theme is on.
+assert.ok(
+  !/prefers-color-scheme/.test(bare),
+  'the stylesheet reads the shell theme signal, not the OS preference',
+)
+
+// The phone toolbar sticks over the material stream, so it has to be opaque too
+// — and, having become opaque, it needs the hairline the desktop toolbar gets
+// away without.
+const toolbarBodies = bodiesFor('.pt-fo-toolbar')
+const stickyBodies = toolbarBodies.filter(body => /position:\s*sticky/.test(body))
+assert.equal(stickyBodies.length, 1, 'the toolbar sticks on a phone')
+assert.ok(/background:\s*var\(--pt-fo-bg\)/.test(stickyBodies[0]), 'the sticky toolbar is opaque')
+assert.ok(
+  /border-bottom:\s*1px solid var\(--pt-line\)/.test(stickyBodies[0]),
+  'the sticky toolbar is closed off with a line',
+)
+
+// A `width:100%` box that also carries padding or a horizontal border is wider
+// than the column it sits in unless it is border-box. Nothing sets that
+// globally: the shell resets border-box per component (its stylesheet has no
+// universal selector) and this project's demo does have a global reset — which
+// is exactly why the notes box painted across the overlay's divider in the real
+// plugin while looking right in the demo. The shape is asserted, so it cannot
+// come back through some other box.
+for (const [, selectorList, body] of bare.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+  if (!/width:\s*100%/.test(body)) continue
+  const padded = /(?:^|;)\s*padding(?:-(?:left|right|inline(?:-start|-end)?))?\s*:\s*[^;]*[1-9]/.test(body)
+  const bordered = /(?:^|;)\s*border(?:-(?:left|right))?\s*:\s*[^;]*[1-9]/.test(body)
+  if (!padded && !bordered) continue
+  assert.ok(
+    /box-sizing:\s*border-box/.test(body),
+    `${selectorList.trim()} is width:100% with padding or a border, so it must be box-sizing:border-box`,
+  )
+}
+
+// The one structural line inside the overlay is the split between its columns,
+// so it is drawn in the heavy weight while the cards keep the light one — on the
+// desktop as a vertical rule, on a phone as a horizontal one. Both halves are
+// asserted: checking only the desktop rule left the phone one faint and green.
+const splitBodies = bodiesFor('.pt-fo-left')
+assert.ok(
+  splitBodies.some(body => /border-right:\s*1px solid var\(--pt-line-strong\)/.test(body)),
+  'the overlay column split is drawn in the heavy line',
+)
+assert.ok(
+  splitBodies.some(body => /border-bottom:\s*1px solid var\(--pt-line-strong\)/.test(body)),
+  'the overlay column split is drawn in the heavy line on a phone too',
+)
+for (const body of splitBodies) {
+  assert.ok(
+    !/(?:border-right|border-bottom):\s*1px solid var\(--pt-line\)/.test(body),
+    'the split never drops back to the light line',
+  )
+}
+
+// On a phone the focus column only pushes the board down: focus mode is one tap
+// away from any row, so the column is dropped rather than stacked. Asserting the
+// exact block keeps it a deliberate rule instead of a stray `display:none`.
+assert.ok(
+  /@media\s*\(max-width:\s*720px\)\s*\{\s*\.pt-focus-col\s*\{\s*display:\s*none;?\s*\}\s*\}/.test(bare),
+  'the focus column is dropped on a phone rather than stacked above the board',
+)
+
 console.log('client bundle ✓  wrapper, exports, panel registration, injection face and styles verified')
