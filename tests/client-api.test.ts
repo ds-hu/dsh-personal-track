@@ -27,6 +27,8 @@ interface Recorded {
   readonly url: string
   readonly method: string
   readonly body: Record<string, unknown> | undefined
+  /** The `keepalive` flag, absent for an ordinary request. */
+  readonly keepalive?: boolean
 }
 
 /** A client wired to a recording fetch, plus what it recorded. */
@@ -42,6 +44,7 @@ function recording(payload: unknown = { ok: true }, init: ResponseInit = {}): {
       body: typeof requestInit?.body === 'string'
         ? JSON.parse(requestInit.body) as Record<string, unknown>
         : undefined,
+      ...(requestInit?.keepalive === undefined ? {} : { keepalive: requestInit.keepalive }),
     })
     return new Response(JSON.stringify(payload), {
       status: 200,
@@ -189,6 +192,25 @@ await checkAsync('optional fields are omitted rather than sent as undefined', as
   const run = recording({ ok: true, day: { date: '2026-09-16' } })
   await run.client.wash('2026-09-16', 2)
   assert.deepEqual(run.calls[0]!.body, { date: '2026-09-16', pieces: 2 })
+})
+
+// --- focusing: opening, and the way out --------------------------------------
+
+await checkAsync('closing a session on the way out is a keepalive request', async () => {
+  // The page is going away, so this is the one request that has to outlive the
+  // document: without the flag it dies with the page, the session stays open,
+  // and the store discards the time it held at the next start.
+  const leaving = recording({ ok: true, entry: { id: 't1', focusSeconds: 0 } })
+  await leaving.client.endFocus('task', 't1', 's1', { keepalive: true })
+  assert.equal(leaving.calls[0]!.method, 'PATCH')
+  assert.equal(leaving.calls[0]!.url, `${API_PREFIX}/focus`)
+  assert.deepEqual(leaving.calls[0]!.body, { kind: 'task', id: 't1', sessionId: 's1' })
+  assert.equal(leaving.calls[0]!.keepalive, true)
+
+  // Leaving the mode by hand is an ordinary request: no flag unless it is asked for.
+  const ordinary = recording({ ok: true, entry: { id: 't1', focusSeconds: 0 } })
+  await ordinary.client.endFocus('task', 't1', 's1')
+  assert.equal(ordinary.calls[0]!.keepalive, undefined)
 })
 
 // --- urlOf -------------------------------------------------------------------

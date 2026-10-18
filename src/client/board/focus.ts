@@ -72,6 +72,24 @@ export function openSession(sessions: readonly FocusSession[]): FocusSession | u
 }
 
 /**
+ * Whether a registry answer is the *entry view*, not the stored record.
+ *
+ * A registry's record and its view are different shapes: the view adds what the
+ * entry cannot know by itself — an image material's mime and byte size, both
+ * derived from the asset table, and the derived `focusSeconds` every entry
+ * carries — while the record is only what storage holds. The two halves of the
+ * plugin update separately (the browser bundle hot reloads, the host half needs
+ * a `dsh` restart), so an older host can hand this bundle a record; adopting it
+ * as the entry would draw every image on that entry as missing and its focus
+ * total as no time at all. `focusSeconds` is the field to ask about because
+ * *both* registry views carry it and no stored record does.
+ */
+export function isEntryView(value: unknown): value is RegistryEntry {
+  if (typeof value !== 'object' || value === null) return false
+  return typeof (value as { focusSeconds?: unknown }).focusSeconds === 'number'
+}
+
+/**
  * A duration as `m:ss`, or `h:mm:ss` once it passes an hour.
  *
  * Seconds are the stored unit (they are what instants subtract to), and this is

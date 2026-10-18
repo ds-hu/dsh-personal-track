@@ -251,4 +251,15 @@ assert.ok(
   'the focus column is dropped on a phone rather than stacked above the board',
 )
 
+// Focus mode has to close its session when the page goes away. A refresh is a
+// real end of the session, and a session left open is discarded by the store at
+// the next start — so the visit's time is lost. No type checker and no
+// render-free test can see a browser event listener, so, like the stylesheet
+// guards above, the shape itself is asserted on the built bundle.
+assert.match(
+  code,
+  /addEventListener\("pagehide"/,
+  'the client closes the focus session when the page is unloaded',
+)
+
 console.log('client bundle ✓  wrapper, exports, panel registration, injection face and styles verified')

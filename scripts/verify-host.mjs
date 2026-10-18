@@ -386,6 +386,21 @@ assert.equal(typeof closed.body.entry.focusSessions[0].endedAt, 'string', 'closi
 assert.equal(closed.body.entry.focusSeconds, 0, 'the pinned clock makes the session zero-length')
 console.log('materials + focus ✓  (image bytes over their own route, one ordered stream, instants only)')
 
+// The answer a focus-mode progress bar gets. Its *shape* is the subject here,
+// not the change: the entry has to be the view — the image material carrying the
+// mime and size its asset gives it, the task carrying its derived state and
+// focus total. Answering the stored record instead is what once made the overlay
+// draw its own images as "missing" the moment the bar was dragged.
+const writeAnswer = await api.call('PATCH', '/tasks', { id: lateId, patch: { progress: { current: 1 } } })
+assert.equal(writeAnswer.status, 200)
+const writeEntry = writeAnswer.body.entry
+const writeImage = writeEntry.materials.find(material => material.kind === 'image')
+assert.equal(writeImage.mime, 'image/png', 'a registry write answers with the material view')
+assert.equal(writeImage.bytes, Buffer.from(TINY_PNG, 'base64').length, 'and its derived size')
+assert.equal(writeEntry.focusSeconds, 0, 'and the entry\'s derived focus total')
+assert.equal(writeEntry.state, 'done', 'and its derived task state')
+console.log('the registry write answer ✓  (the entry view, not the stored record)')
+
 // --- a version 1 document is still read --------------------------------------
 // The domain moved to version 2 (assets, materials, focusSessions). A
 // `per-record` backend *discards* a document stamped with a version it does not

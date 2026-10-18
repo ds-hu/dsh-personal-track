@@ -206,11 +206,14 @@ export function isOverdue(task: TaskRecord, today: DayKey): boolean {
 /**
  * Seconds spent focusing on one entry, summed over its sessions.
  *
- * Only **closed** sessions count. An open session has no end, and the three
- * candidate guesses for one — "now", the last write, the page unload — all
- * invent a duration that never happened, so it is dropped instead (the next
- * `startFocus` clears it away). A backwards pair counts zero rather than
- * negative time.
+ * Only **closed** sessions count. An open session has no end, and no instant
+ * the *host* could pick for one — "now", or the moment of the last write — is
+ * the moment the user actually stopped, so it is dropped instead (the next
+ * `startFocus` clears it away) rather than closed at a guess. The one end the
+ * client can honestly report is the page going away, and it does
+ * (`pagehide` in `FocusOverlay`): a refresh is a real end. A crash fires no
+ * such event, and that session is the one this rule drops. A backwards pair
+ * counts zero rather than negative time.
  */
 export function focusSeconds(
   sessions: readonly { readonly startedAt: string; readonly endedAt?: string }[],

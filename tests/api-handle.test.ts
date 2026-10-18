@@ -301,7 +301,8 @@ await checkAsync('a task patch merges progress, clears on null and follows compl
   const api = createHarness()
   const created = await api.state('POST', '/tasks', { title: '线代作业', category: '数学', due: DATE })
   const id = (created.entry as { id: string }).id
-  // The derived state lives on the `tasks` list; `entry` is the stored record.
+  // `entry` is the view too (asserted separately below); these assertions read
+  // through the list because they are about what the refreshed list reports.
   const listed = (body: Record<string, unknown>): Record<string, unknown> =>
     (body.tasks as Record<string, unknown>[]).find(task => task.id === id) as Record<string, unknown>
 
@@ -447,6 +448,47 @@ await checkAsync('focus sessions open, close, and answer with the entry', async 
   const sessions = closed.focusSessions as { endedAt?: string }[]
   assert.equal(typeof sessions[0]?.endedAt, 'string', 'closing stamps the end the host chose')
   assert.equal(closed.focusSeconds, 0, 'the pinned clock makes the session zero-length')
+})
+
+/**
+ * A registry write's answer is an *entry view*, on both registries.
+ *
+ * Focus mode adopts that answer as its whole entry, so the shape is not a
+ * detail: the stored record carries neither the mime/size a material derives
+ * from the asset table nor the derived `focusSeconds`/`state`, and a client
+ * that adopts it draws every image on the entry as missing and its focus time
+ * as NaN. That is exactly what a progress bar dragged in focus mode used to do.
+ */
+await checkAsync('a registry write answers with the entry in the view\'s shape', async () => {
+  const api = createHarness()
+  const task = await api.state('POST', '/tasks', { title: '线代作业', progress: { current: 0, total: 10 } })
+  const id = (task.entry as { id: string }).id
+  await api.entry('POST', '/asset', { kind: 'task', id, mime: 'image/png', data: TINY_PNG, name: '讲义.png' })
+  // One closed session, so the entry has a real (zero-length, pinned clock) total.
+  const focused = await api.call('POST', '/focus', { kind: 'task', id })
+  await api.call('PATCH', '/focus', { kind: 'task', id, sessionId: focused.body.sessionId })
+
+  const patched = await api.entry('PATCH', '/tasks', { id, patch: { progress: { current: 4 } } })
+  const image = (patched.materials as { kind: string; mime?: string; bytes?: number }[])[0]
+  assert.equal(image?.kind, 'image')
+  assert.equal(image?.mime, 'image/png', 'the material carries the mime derived from its asset')
+  assert.equal(image?.bytes, Buffer.from(TINY_PNG, 'base64').length, 'and its derived size')
+  assert.equal(typeof patched.focusSeconds, 'number', 'the focus total is on the entry, not only on the list')
+  assert.equal(patched.state, 'doing', 'and so is the derived task state')
+
+  const created = await api.entry('POST', '/tasks', { title: '新任务' })
+  assert.equal(created.state, 'todo', 'a created task answers as the view too')
+  assert.equal(created.focusSeconds, 0)
+
+  // The same contract on the other registry: an image material and the derived
+  // focus total have to survive a media write as well.
+  const book = await api.entry('POST', '/media', { kind: 'book', title: '三体' })
+  await api.entry('POST', '/asset', { kind: 'media', id: String(book.id), mime: 'image/png', data: TINY_PNG })
+  const noted = await api.entry('PATCH', '/media', { id: String(book.id), patch: { notes: '读到第三章' } })
+  const cover = (noted.materials as { kind: string; mime?: string }[])[0]
+  assert.equal(cover?.mime, 'image/png', 'a media write answers with the material view too')
+  assert.equal(typeof noted.focusSeconds, 'number', 'and with its derived focus total')
+  assert.equal(noted.notes, '读到第三章')
 })
 
 await checkAsync('the sweep reclaims an orphan an interrupted write left behind', async () => {

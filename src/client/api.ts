@@ -118,7 +118,7 @@ export interface HabitClient {
   /** Open a focus session; a session a crash left open is dropped first. */
   startFocus(owner: RegistryKind, id: string): Promise<FocusStartResult>
   /** Close one focus session; an already-closed one is left alone. */
-  endFocus(owner: RegistryKind, id: string, sessionId: string): Promise<EntryResult>
+  endFocus(owner: RegistryKind, id: string, sessionId: string, options?: EndFocusOptions): Promise<EntryResult>
   /** Range aggregates, computed on the host. */
   stats(from: string, to: string): Promise<StatsView>
   /** The whole domain as one portable document. */
@@ -173,23 +173,32 @@ export interface TaskPatch {
   readonly notes?: string | null
 }
 
-/** The media list a registry call answers with. */
+/** The media list a registry call answers with, plus the entry it changed. */
 export interface MediaResult {
   readonly ok: true
   readonly media: readonly MediaEntry[]
+  /**
+   * The changed entry in the state slice's shape — the same shape as the one in
+   * `media`, not the bare stored record: an image material carries the mime and
+   * the byte size derived from its asset, and the entry carries its derived
+   * `focusSeconds`. Focus mode adopts this whole, so a record here would show
+   * up as missing images and a zero focus total.
+   */
   readonly entry?: MediaEntry
 }
 
-/** The task list a registry call answers with. */
+/** The task list a registry call answers with, plus the entry it changed. */
 export interface TaskResult {
   readonly ok: true
   readonly tasks: readonly TaskEntry[]
+  /** The changed entry in the state slice's shape — see {@link MediaResult.entry}. */
   readonly entry?: TaskEntry
 }
 
 /** What a material or focus call answers with: the entry it changed. */
 export interface EntryResult {
   readonly ok: true
+  /** The changed entry in the state slice's shape, as the lists carry it. */
   readonly entry: TaskEntry | MediaEntry
 }
 
@@ -230,6 +239,34 @@ export interface HabitClientOptions {
   readonly doFetch?: typeof fetch
 }
 
+/** Options for closing a focus session. */
+export interface EndFocusOptions {
+  /**
+   * Let the request outlive the document that sent it.
+   *
+   * The one caller that needs this is a page going away: a refresh or a closed
+   * tab is a real end of the session, and a request that dies with the document
+   * would leave the session open for the store to discard — which is the same
+   * as losing the time it held.
+   */
+  readonly keepalive?: boolean
+}
+
+/**
+ * The failure a half-updated install reports.
+ *
+ * A host half is only replaced by a `dsh` restart while this bundle hot reloads
+ * on its own, so a client is routinely newer than the host it talks to. The
+ * reads that need a field the older host did not send check for it here, and a
+ * registry *write* checks the one thing it cannot afford to adopt: an entry
+ * that is the stored record rather than the view (the caller's check — see
+ * `isEntryView` in `board/focus.ts`). Naming the situation is the difference
+ * between "restart dsh" and an entry that draws its own images as missing.
+ */
+export function staleHostError(): HabitApiError {
+  return new HabitApiError(0, 'habit/stale-host', '插件宿主半身未更新：请重启 dsh --profile web')
+}
+
 /**
  * Create the command surface handed to the board through slot injection.
  *
@@ -265,11 +302,11 @@ export function createHabitClient(options: HabitClientOptions = {}): HabitClient
 
   /**
    * The host half is only replaced by a `dsh` restart, while this bundle hot
-   * reloads on its own. A board running against an older host would otherwise
-   * fail silently on a missing field, so say what to do instead.
+   * reloads on its own, so this client can legitimately be newer than the host
+   * it talks to. Say what to do instead of failing on a missing field.
    */
   const staleHost = (): never => {
-    throw new HabitApiError(0, 'habit/stale-host', '插件宿主半身未更新：请重启 dsh --profile web')
+    throw staleHostError()
   }
 
   return {
@@ -354,8 +391,14 @@ export function createHabitClient(options: HabitClientOptions = {}): HabitClient
       if (typeof value.sessionId !== 'string') staleHost()
       return value
     },
-    endFocus: (owner, id, sessionId) =>
-      request<EntryResult>(url('focusEnd'), body('focusEnd', { kind: owner, id, sessionId })),
+    endFocus: (owner, id, sessionId, options) => request<EntryResult>(
+      url('focusEnd'),
+      {
+        ...body('focusEnd', { kind: owner, id, sessionId }),
+        // Only ever sent as `true`: an absent key is the transport's default.
+        ...(options?.keepalive === true ? { keepalive: true } : {}),
+      },
+    ),
     stats: (from, to) => request<StatsView>(url('stats', { from, to })),
     exportAll: async () => {
       const value = await request<{ ok: true; backup: BackupBundle }>(url('exportBackup'))

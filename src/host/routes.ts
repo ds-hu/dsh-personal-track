@@ -19,7 +19,14 @@ import { dayKeySpan, habitDayKey, instantForHabitDay, isNightTail, type DayKey }
 import { mediaRecord, taskRecord } from './domain.ts'
 import { ApiError } from './api-error.ts'
 import { buildStats } from './stats.ts'
-import { base64Bytes, type HabitStore, type SessionKind } from './store.ts'
+import {
+  base64Bytes,
+  type HabitStore,
+  type MediaView,
+  type SessionKind,
+  type StateView,
+  type TaskView,
+} from './store.ts'
 import type { RouteName } from '../shared/route.ts'
 import { MAX_IMAGE_BYTES } from '../shared/route.ts'
 
@@ -118,12 +125,47 @@ const imageData = z.string().min(1).refine(
   '图片超过上限',
 )
 
-/** The registry entry a mutation just changed, in the view's own shape. */
-function entryOf(ctx: RouteCtx, kind: 'task' | 'media', id: string): unknown {
+/**
+ * One registry read, shared by every answer built from a mutation.
+ *
+ * The list and the entry come out of a single slice, so two fields of one
+ * response can never disagree about what was just written.
+ */
+function registryView(
+  ctx: RouteCtx,
+  kind: 'task' | 'media',
+  id: string,
+): { readonly view: StateView; readonly entry: TaskView | MediaView | undefined } {
   const view = ctx.store.view(ctx.today(), ctx.today())
+  return {
+    view,
+    entry: kind === 'task'
+      ? view.tasks.find(entry => entry.id === id)
+      : view.media.find(entry => entry.id === id),
+  }
+}
+
+/** The registry entry a material or focus mutation just changed. */
+function entryOf(ctx: RouteCtx, kind: 'task' | 'media', id: string): unknown {
+  return registryView(ctx, kind, id).entry
+}
+
+/**
+ * One registry write's answer: the refreshed list plus the entry it changed,
+ * both in the **view**'s shape.
+ *
+ * The entry is the view and never the stored record. A record carries neither
+ * the mime nor the byte size of an image material — both are derived from the
+ * asset table — nor the derived `focusSeconds`/`state` a task shows, so a
+ * client that adopts a record as its entry renders every image on that entry as
+ * missing and its focus time as no time at all. That is not hypothetical: it is
+ * what dragging focus mode's progress bar used to do.
+ */
+function registryAnswer(ctx: RouteCtx, kind: 'task' | 'media', id: string): Record<string, unknown> {
+  const { view, entry } = registryView(ctx, kind, id)
   return kind === 'task'
-    ? view.tasks.find(entry => entry.id === id)
-    : view.media.find(entry => entry.id === id)
+    ? { ok: true, tasks: view.tasks, entry }
+    : { ok: true, media: view.media, entry }
 }
 
 const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD')
@@ -473,7 +515,7 @@ export const handlers: Record<RouteName, RouteHandler> = {
       createdAt: ctx.iso(),
     })
     await ctx.store.putMedia(record)
-    return { ok: true, media: ctx.store.view(ctx.today(), ctx.today()).media, entry: record }
+    return registryAnswer(ctx, 'media', record.id)
   },
 
   async patchMedia(ctx, body) {
@@ -489,7 +531,7 @@ export const handlers: Record<RouteName, RouteHandler> = {
       notes: z.string().nullable().optional(),
     }), outer.patch, 'media patch')
     const entry = await ctx.store.patchMedia(outer.id, patch)
-    return { ok: true, media: ctx.store.view(ctx.today(), ctx.today()).media, entry }
+    return registryAnswer(ctx, 'media', entry.id)
   },
 
   async removeMedia(ctx, _body, query) {
@@ -520,7 +562,7 @@ export const handlers: Record<RouteName, RouteHandler> = {
       checkpoints: (raw.checkpoints ?? []).map(line => ({ ...line, id: ctx.store.newId() })),
     })
     await ctx.store.putTask(record)
-    return { ok: true, tasks: ctx.store.view(ctx.today(), ctx.today()).tasks, entry: record }
+    return registryAnswer(ctx, 'task', record.id)
   },
 
   async patchTask(ctx, body) {
@@ -542,7 +584,7 @@ export const handlers: Record<RouteName, RouteHandler> = {
       notes: z.string().nullable().optional(),
     }), outer.patch, 'task patch')
     const entry = await ctx.store.patchTask(outer.id, patch)
-    return { ok: true, tasks: ctx.store.view(ctx.today(), ctx.today()).tasks, entry }
+    return registryAnswer(ctx, 'task', entry.id)
   },
 
   async removeTask(ctx, _body, query) {

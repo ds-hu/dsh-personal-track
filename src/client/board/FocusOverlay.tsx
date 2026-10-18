@@ -18,11 +18,11 @@
  *   the mode works either way.
  */
 import { useCallback, useEffect, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
-import type { HabitClient, MediaPatch, TaskPatch } from '../api.ts'
+import { staleHostError, type HabitClient, type MediaPatch, type TaskPatch } from '../api.ts'
 import { MAX_IMAGE_BYTES } from '../../shared/route.ts'
 import type { Material, MediaEntry, TaskEntry } from '../types.ts'
 import { dueLevelOf, fractionText, mediaStatusLabel, messageOf, percentOf } from './format.ts'
-import { clockLabel, formatDuration, nowLabel, openSession, type Pinned, type RegistryEntry } from './focus.ts'
+import { clockLabel, formatDuration, isEntryView, nowLabel, openSession, type Pinned, type RegistryEntry } from './focus.ts'
 import { Markdown } from './Markdown.tsx'
 import { IconButton } from './tile.tsx'
 
@@ -105,6 +105,26 @@ export function FocusOverlay({ client, target, entry: initial, onClose }: FocusO
 
   const report = useCallback((cause: unknown) => { setError(messageOf(cause)) }, [])
 
+  /**
+   * Take the entry a write answered with — but only if it is a view.
+   *
+   * A registry write answers with the entry in the state slice's shape; an
+   * older host half answers with the bare stored record, whose materials carry
+   * no mime and whose focus total is missing. Adopting one is what used to turn
+   * every image here into "图片缺失" the moment the progress bar was dragged, so
+   * the shape is checked and the situation is named instead. The entry already
+   * on screen is left alone: it is a view, and it is closer to the truth than a
+   * record would be.
+   */
+  const adopt = useCallback((next: RegistryEntry | undefined): RegistryEntry | undefined => {
+    if (next === undefined) return undefined
+    if (!isEntryView(next)) {
+      report(staleHostError())
+      return undefined
+    }
+    return next
+  }, [report])
+
   /** Run one write and adopt the entry it answers with. */
   const run = useCallback(async (
     action: () => Promise<{ readonly entry?: RegistryEntry }>,
@@ -112,7 +132,7 @@ export function FocusOverlay({ client, target, entry: initial, onClose }: FocusO
     setBusy(true)
     try {
       const result = await action()
-      const next = result.entry
+      const next = adopt(result.entry)
       if (next === undefined) return null
       setEntry(next)
       setError(null)
@@ -123,7 +143,7 @@ export function FocusOverlay({ client, target, entry: initial, onClose }: FocusO
     } finally {
       setBusy(false)
     }
-  }, [report])
+  }, [adopt, report])
 
   /** The notes write for whichever registry this is. */
   const writeNotes = useCallback((text: string): Promise<{ readonly entry?: RegistryEntry }> => (
@@ -140,12 +160,44 @@ export function FocusOverlay({ client, target, entry: initial, onClose }: FocusO
       .then((result) => {
         if (!alive) return
         setSessionId(result.sessionId)
-        if (result.entry !== undefined) setEntry(result.entry)
         setError(null)
+        const adopted = adopt(result.entry)
+        if (adopted !== undefined) setEntry(adopted)
       })
       .catch((cause: unknown) => { if (alive) report(cause) })
     return () => { alive = false }
-  }, [client, report, target.id, target.kind])
+  }, [adopt, client, report, target.id, target.kind])
+
+  /**
+   * Leaving the page is leaving the mode.
+   *
+   * A refresh or a closed tab is not a crash: the session really stops there, so
+   * it is closed at that instant instead of being left open for the store to
+   * discard — and a discarded session counts no time at all, which is what "the
+   * focus time went to zero after a refresh" looks like from the board.
+   * `keepalive` is what lets the request outlive the document that sent it. A
+   * real crash fires no event at all, and that session is still dropped by the
+   * next start.
+   *
+   * `pagehide` rather than `beforeunload` or `visibilitychange`: it fires for
+   * every unload, refresh and bfcache transition, while the others either miss
+   * the bfcache path or end a session the user is still sitting in front of
+   * (every tab switch would).
+   */
+  useEffect(() => {
+    if (sessionId === null) return
+    const leave = (): void => {
+      if (closed.current) return
+      void client.endFocus(target.kind, target.id, sessionId, { keepalive: true }).catch(() => {})
+    }
+    window.addEventListener('pagehide', leave)
+    return () => {
+      window.removeEventListener('pagehide', leave)
+      // An unmount that did not go through `close()` — the panel going away — is
+      // a departure too, and the session must not outlive the mode because of it.
+      leave()
+    }
+  }, [client, sessionId, target.id, target.kind])
 
   useEffect(() => {
     const timer = window.setInterval(() => setNowMs(Date.now()), 1000)

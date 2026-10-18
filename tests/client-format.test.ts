@@ -25,6 +25,7 @@ import {
   weekEndKey,
 } from '../src/client/board/format.ts'
 import { dayReport } from '../src/client/board/report.ts'
+import { isEntryView } from '../src/client/board/focus.ts'
 import type { ClockView, StateView, TaskEntry } from '../src/client/types.ts'
 
 let passed = 0
@@ -309,6 +310,41 @@ check('a line that is not label@position is a problem, not a guess', () => {
 check('an empty textarea is an empty list, never a problem', () => {
   assert.deepEqual(parseCheckpoints(''), { list: [] })
   assert.deepEqual(parseCheckpoints(' \n\n'), { list: [] })
+})
+
+console.log('what a registry answer must be before focus mode adopts it')
+check('only a view is adoptable, never the stored record', () => {
+  // The view: what `/state` lists and what every registry write answers with —
+  // an image material with the mime its asset gives it, and a derived total.
+  const view = taskOf({
+    id: 't1',
+    title: '线代作业',
+    progress: { current: 0, total: 10 },
+    checkpoints: [],
+    createdAt: '2026-09-16T11:00:00',
+    state: 'todo',
+    overdue: false,
+  })
+  assert.equal(isEntryView(view), true)
+
+  // The same task as storage holds it. Nothing here is missing by accident: a
+  // record has no derived fields, and its image material is only a reference —
+  // adopting one is what drew every image as "图片缺失" and the focus total as
+  // NaN the moment the progress bar was dragged in focus mode.
+  const record = {
+    id: 't1',
+    title: '线代作业',
+    progress: { current: 0, total: 10 },
+    checkpoints: [],
+    createdAt: '2026-09-16T11:00:00',
+    materials: [{ kind: 'image', id: 'm1', assetId: 'a1', createdAt: '2026-09-16T11:01:00' }],
+    focusSessions: [],
+  }
+  assert.equal(isEntryView(record), false, 'a stored record is not an entry view')
+
+  assert.equal(isEntryView(undefined), false)
+  assert.equal(isEntryView(null), false)
+  assert.equal(isEntryView('entry'), false)
 })
 
 console.log(`\n${passed} checks passed`)
