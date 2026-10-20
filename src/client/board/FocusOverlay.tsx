@@ -25,6 +25,7 @@ import { dueLevelOf, fractionText, mediaStatusLabel, messageOf, percentOf } from
 import { clockLabel, formatDuration, isEntryView, nowLabel, openSession, type Pinned, type RegistryEntry } from './focus.ts'
 import { Markdown } from './Markdown.tsx'
 import { IconButton } from './tile.tsx'
+import { createWriteQueue } from './write-queue.ts'
 
 /** How long the notes and Markdown editors wait before writing. */
 const SAVE_DELAY_MS = 800
@@ -38,7 +39,14 @@ export interface FocusOverlayProps {
   readonly target: Pinned
   /** The entry as the panel last saw it; the overlay keeps its own copy after. */
   readonly entry: RegistryEntry
-  /** Called once, with the entry as last written, when the mode is left. */
+  /**
+   * Called once, with the entry as last written, when the mode is left.
+   *
+   * The caller is expected to *use* it: nothing else in the panel saw the writes
+   * this mode made, and the surface that re-reads on its own reads a different
+   * day. Adopting it here and letting the board re-read is what makes the
+   * progress edited on this screen visible the moment the overlay goes away.
+   */
   readonly onClose: (entry: RegistryEntry) => void
 }
 
@@ -96,6 +104,12 @@ export function FocusOverlay({ client, target, entry: initial, onClose }: FocusO
   const notesTimer = useRef(0)
   const blockTimers = useRef(new Map<string, number>())
   const closed = useRef(false)
+  /** Writes go through this one at a time — see `./write-queue.ts` for why. */
+  const queue = useRef(createWriteQueue())
+  /** How many writes are still in flight; `busy` is "more than none". */
+  const pending = useRef(0)
+  /** The entry the host last described — what leaving the mode hands back. */
+  const latest = useRef<RegistryEntry>(initial)
 
   const isTask = target.kind === 'task'
   const task = isTask ? entry as TaskEntry : null
@@ -115,6 +129,10 @@ export function FocusOverlay({ client, target, entry: initial, onClose }: FocusO
    * the shape is checked and the situation is named instead. The entry already
    * on screen is left alone: it is a view, and it is closer to the truth than a
    * record would be.
+   *
+   * Every adopted entry is also remembered in `latest`: leaving the mode hands
+   * that one back, and it must be the *last written*, not whatever the render
+   * closure happened to capture.
    */
   const adopt = useCallback((next: RegistryEntry | undefined): RegistryEntry | undefined => {
     if (next === undefined) return undefined
@@ -122,16 +140,25 @@ export function FocusOverlay({ client, target, entry: initial, onClose }: FocusO
       report(staleHostError())
       return undefined
     }
+    latest.current = next
     return next
   }, [report])
 
-  /** Run one write and adopt the entry it answers with. */
+  /**
+   * Run one write and adopt the entry it answers with.
+   *
+   * Queued rather than fired: these writes carry absolute values ("20", not
+   * "+3"), so two progress writes must reach the host in the order they were
+   * issued — otherwise the older one wins the column and the next `+1` is
+   * computed from a value the host has already left behind.
+   */
   const run = useCallback(async (
     action: () => Promise<{ readonly entry?: RegistryEntry }>,
   ): Promise<RegistryEntry | null> => {
+    pending.current += 1
     setBusy(true)
     try {
-      const result = await action()
+      const result = await queue.current.run(action)
       const next = adopt(result.entry)
       if (next === undefined) return null
       setEntry(next)
@@ -141,7 +168,10 @@ export function FocusOverlay({ client, target, entry: initial, onClose }: FocusO
       report(cause)
       return null
     } finally {
-      setBusy(false)
+      // A count, not a flag: a queued write finishing must not re-enable the
+      // ± buttons while the one behind it is still on its way.
+      pending.current -= 1
+      if (pending.current === 0) setBusy(false)
     }
   }, [adopt, report])
 
@@ -156,7 +186,11 @@ export function FocusOverlay({ client, target, entry: initial, onClose }: FocusO
 
   useEffect(() => {
     let alive = true
-    void client.startFocus(target.kind, target.id)
+    // Queued like every other write, and first in the queue: the session opener
+    // answers with a whole entry view, and one that overtook a progress write
+    // would put the older progress back on screen — the same defect the queue
+    // exists to remove, arriving by another door.
+    void queue.current.run(() => client.startFocus(target.kind, target.id))
       .then((result) => {
         if (!alive) return
         setSessionId(result.sessionId)
@@ -210,12 +244,26 @@ export function FocusOverlay({ client, target, entry: initial, onClose }: FocusO
     return () => document.removeEventListener('fullscreenchange', onFullscreenChange)
   }, [])
 
-  /** Leave the mode: close the session, then hand the entry back. */
+  /**
+   * Leave the mode: let the writes land, close the session, then hand the entry
+   * back.
+   *
+   * The wait is the point. The board re-reads its day the moment this returns,
+   * and a write still in flight would make that read see the value from before
+   * it — which is exactly what "退出专注后进度条还停在 17" looked like. The timers
+   * are cleared first, so no debounced note or block write can join the queue
+   * after the wait begins.
+   *
+   * The cost is that an unresponsive host delays leaving as much as it already
+   * delays `endFocus` below; there is no timeout here for the same reason there
+   * is none there — a dropped session is worse than a slow exit.
+   */
   const close = useCallback(async (): Promise<void> => {
     if (closed.current) return
     closed.current = true
     window.clearTimeout(notesTimer.current)
     for (const timer of blockTimers.current.values()) window.clearTimeout(timer)
+    await queue.current.settled()
     if (sessionId !== null) {
       try {
         await client.endFocus(target.kind, target.id, sessionId)
@@ -225,8 +273,8 @@ export function FocusOverlay({ client, target, entry: initial, onClose }: FocusO
       }
     }
     if (document.fullscreenElement !== null) void document.exitFullscreen().catch(() => {})
-    onClose(entry)
-  }, [client, entry, onClose, sessionId, target.id, target.kind])
+    onClose(latest.current)
+  }, [client, onClose, sessionId, target.id, target.kind])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {

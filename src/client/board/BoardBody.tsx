@@ -82,10 +82,30 @@ export interface BoardBodyProps {
   readonly onShowStats: () => void
   /** Opens one registry entry in focus mode. */
   readonly onOpenFocus: (entry: RegistryEntry) => void
+  /**
+   * Bumped when another surface wrote state, so the board re-reads its day.
+   *
+   * The board holds its own slice — it reads the day being *shown*, which is not
+   * always the panel's today — so nothing else can refresh it. Focus mode is the
+   * writer that matters: without this token its progress and notes edits never
+   * reach this component, and the bars stay on the value from before the overlay
+   * was opened.
+   */
+  readonly refreshToken: number
+  /**
+   * Told every time the board adopts a slice.
+   *
+   * The registry lists (`tasks`, `media`) are global, so the panel can take them
+   * from any read the board makes; that is how a card pinned in the focus column
+   * notices that its task was completed on the board.
+   */
+  readonly onStateRead: (state: StateView) => void
 }
 
 /** Render the board. */
-export function BoardBody({ client, onShowStats, onOpenFocus }: BoardBodyProps): JSX.Element {
+export function BoardBody({
+  client, onShowStats, onOpenFocus, refreshToken, onStateRead,
+}: BoardBodyProps): JSX.Element {
   const [clock, setClock] = useState<ClockView | null>(null)
   const [date, setDate] = useState<string | null>(null)
   const [state, setState] = useState<StateView | null>(null)
@@ -93,19 +113,40 @@ export function BoardBody({ client, onShowStats, onOpenFocus }: BoardBodyProps):
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
   const copyTimer = useRef(0)
+  /**
+   * The reads issued so far, so an older answer cannot overwrite a newer one.
+   *
+   * Two things read this day now — the date navigator and the panel's `refreshToken`
+   * — and a read is a round trip; the answer that arrives last is not
+   * necessarily the one asked for last.
+   */
+  const reads = useRef(0)
+  /** The token this board has already honoured; a remount starts level. */
+  const seenToken = useRef(refreshToken)
 
   const report = useCallback((cause: unknown) => {
     setError(messageOf(cause))
   }, [])
 
+  /** Adopt one slice: it becomes what is drawn, and the panel hears about it. */
+  const adopt = useCallback((next: StateView) => {
+    setState(next)
+    setError(null)
+    onStateRead(next)
+  }, [onStateRead])
+
   const loadState = useCallback(async (target: string) => {
+    const seq = ++reads.current
     try {
-      setState(await client.state(target))
-      setError(null)
+      const next = await client.state(target)
+      // Superseded: a later read (or a mutation's own answer) is on its way, and
+      // it knows more than this one does.
+      if (seq !== reads.current) return
+      adopt(next)
     } catch (cause) {
-      report(cause)
+      if (seq === reads.current) report(cause)
     }
-  }, [client, report])
+  }, [adopt, client, report])
 
   const loadClock = useCallback(async (): Promise<ClockView | null> => {
     try {
@@ -142,6 +183,15 @@ export function BoardBody({ client, onShowStats, onOpenFocus }: BoardBodyProps):
     return () => window.removeEventListener('focus', onFocus)
   }, [date, loadClock, loadState])
 
+  // Another surface wrote state: focus mode's overlay covered this board, so its
+  // writes are invisible here until the shown day is read again — the task's bar
+  // and the cell that bar fills both hang off this slice.
+  useEffect(() => {
+    if (refreshToken === seenToken.current) return
+    seenToken.current = refreshToken
+    if (date !== null) void loadState(date)
+  }, [date, loadState, refreshToken])
+
   // The copy confirmation is a flash, not a state: never let its timer outlive
   // the tab.
   useEffect(() => () => window.clearTimeout(copyTimer.current), [])
@@ -150,14 +200,17 @@ export function BoardBody({ client, onShowStats, onOpenFocus }: BoardBodyProps):
   const act = useCallback(async (action: () => Promise<StateView>) => {
     setBusy(true)
     try {
-      setState(await action())
-      setError(null)
+      const next = await action()
+      // This answer is newer than any read still in flight, so it also retires
+      // them: the mutation's own slice already includes what they were asking.
+      reads.current += 1
+      adopt(next)
     } catch (cause) {
       report(cause)
     } finally {
       setBusy(false)
     }
-  }, [report])
+  }, [adopt, report])
 
   if (date === null || clock === null) {
     return <div className="pt-board"><div className="pt-muted">加载中…</div></div>

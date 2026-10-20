@@ -21,7 +21,7 @@ DeepSeek Harness（DSH）插件：**一个主面板「习惯看板」**，内含
 
 **素材 = 文本块（Markdown）+ 图片**，按加入顺序混排：`＋ 文本` 加一块 Markdown（标题/列表/引用/代码/行内样式，自己解析、零依赖、不经过 HTML 注入），`添加图片…`、直接 Ctrl+V 粘贴或拖入图片即可成为素材。长图默认整页适应，点一下切到原始尺寸（可滚动）；单张上限 10 MB。
 
-**专注栏**常驻打卡视图左侧：有置顶条目时显示它的卡片（累计专注、「继续专注」、取消置顶），没有时显示时钟、习惯日与当日完成摘要。置顶是展示态，记在浏览器本地，不进域、不进备份。窄屏（≤720px）下不显示这一栏——它没地方待在**看板**旁边，只会把看板往下推；专注模式改从看板任意条目进入，置顶照旧。
+**专注栏**常驻打卡视图左侧：有置顶条目时显示它的卡片（累计专注、「继续专注」、取消置顶），没有时显示时钟、习惯日与当日完成摘要。置顶是展示态，记在浏览器本地，不进域、不进备份。**置顶的任务一旦完成就自动撤下**，专注栏回到时钟空态，不必手点 ×（完成不是删除，记录仍在看板里）；正在专注它的那一段除外，退出专注时才撤。窄屏（≤720px）下不显示这一栏——它没地方待在**看板**旁边，只会把看板往下推；专注模式改从看板任意条目进入，置顶照旧。
 
 
 两处**初值**是替你算好的：新增会话（背单词 / 多邻国 / 健身 / 洗衣）的**时间默认当前时刻**
@@ -213,7 +213,8 @@ src/client/  index.tsx（注册面：唯一主面板 + 侧栏入口）· api.ts�
              types.ts（线上契约）· styles.ts（注入式样式表，含专注模式与专注栏）
              board/（tile 原语 + 看板卡片 + 统计面板 + 数据卡片 + TrackPanel/FocusColumn/FocusOverlay）
              board/editor-state.ts（编辑器与导入状态机，纯函数）
-             board/focus.ts（专注的纯规则：置顶、时长格式）· board/markdown.ts（迷你 Markdown 解析）
+             board/focus.ts（专注的纯规则：置顶、交接、时长格式）· board/markdown.ts（迷你 Markdown 解析）
+             board/write-queue.ts（专注模式写入的串行队列：先落库，再退出）
              board/Markdown.tsx（把解析结果渲染成 React 节点，不经过 HTML 注入）
 scripts/     build.mjs（esbuild CLI 双产物）· run-tests.mjs（逐文件跑测试）
              verify-client.mjs · verify-host.mjs（真实栈：接线与持久化）
@@ -221,6 +222,7 @@ tests/       support.ts（内存 Domain + 无端口 HTTP 驱动，按 schema 校
              data-layer.test.ts（习惯日与派生值）· store.test.ts · stats.test.ts · backup.test.ts
              api-handle.test.ts · focus.test.ts（专注会话与素材）· markdown.test.ts
              client-format.test.ts · client-api.test.ts · editor-state.test.ts
+             focus-panel.test.ts（专注退出后的交接、写队列与置顶撤下）
 docs/adr/    0001 树外传输 · 0002 状态派生不落库 · 0003 图片存域内 base64
 demo/        focus-mode.html（专注模式的零依赖单文件 demo，与实现同步；它读系统偏好、
              带全局 border-box，是因为它自己就扮演「外壳」，见文件顶部注释）
@@ -273,3 +275,10 @@ demo/        focus-mode.html（专注模式的零依赖单文件 demo，与实�
   刷新/关标签后那段真实时长会变成「未闭合会话」，被下一次进入专注模式时丢弃（看起来就是专注时长归零）。
   事件本身无法用本仓库的测试框架断言（没有 DOM 渲染），所以 `verify-client.mjs` 按**形状**守住产物里
   必然出现 `addEventListener("pagehide"` 这一条。
+- **退出专注后看板必须重读，而它读的不是今天**：面板与看板各持一份 `state` —— 面板读**今天**（专注栏与
+  置顶卡），看板读**正在看的那一天**（可能是历史日），所以合并成一个 slice 是错的，只能让看板按
+  `refreshToken` 重读它自己那一天。`onClose(entry)` 带回的条目要**真的用上**（`withEntry` 先本地采纳，
+  卡片当场更新），再由宿主的重读确认。
+  写入还必须**串行**（`board/write-queue.ts`）：拖动进度条连发几次**绝对值**的写，回包乱序时「最后一个
+  响应」并不是最后一次写，采纳它就等于让旧值盖住新值；退出时先 `settled()` 再重读宿主，否则重读会跑在
+  最后一次写前面。两件合起来，就是「退出专注后进度条停在 17，切一天或刷新才对」。
