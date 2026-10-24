@@ -16,9 +16,8 @@ import {
   instantForHabitDay,
   isNightTail,
   shiftDayKey,
-} from '../src/host/daykey.ts'
+} from '../src/shared/habit-day.ts'
 import {
-  CELL_TOTAL,
   cellProgress,
   dayCells,
   duolingoMet,
@@ -30,6 +29,7 @@ import {
   taskState,
   vocabProgress,
 } from '../src/host/derive.ts'
+import { CELL_TOTAL } from '../src/host/habits.ts'
 import { dayRecord, taskRecord, type DayRecord, type TaskRecord } from '../src/host/domain.ts'
 
 let passed = 0

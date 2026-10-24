@@ -11,7 +11,6 @@
 import { strict as assert } from 'node:assert'
 import {
   clockTimeOf,
-  daysBetweenKeys,
   dueLevelOf,
   fractionText,
   formatCheckpoints,
@@ -19,11 +18,11 @@ import {
   messageOf,
   parseCheckpoints,
   percentOf,
-  shiftKey,
   TIME_FIELD,
   timeField,
   weekEndKey,
 } from '../src/client/board/format.ts'
+import { daysBetween, habitDayKey, shiftDayKey } from '../src/shared/habit-day.ts'
 import { dayReport } from '../src/client/board/report.ts'
 import { isEntryView } from '../src/client/board/focus.ts'
 import type { ClockView, StateView, TaskEntry } from '../src/client/types.ts'
@@ -37,10 +36,10 @@ function check(label: string, fn: () => void): void {
   console.log(`  ✓ ${label}`)
 }
 
-console.log('habit-day key arithmetic (client mirror)')
+console.log('habit-day key arithmetic (one copy, shared by both halves)')
 check('shifting crosses a month boundary', () => {
-  assert.equal(shiftKey('2026-09-30', 4), '2026-10-04')
-  assert.equal(shiftKey('2026-10-01', -1), '2026-09-30')
+  assert.equal(shiftDayKey('2026-09-30', 4), '2026-10-04')
+  assert.equal(shiftDayKey('2026-10-01', -1), '2026-09-30')
 })
 
 console.log('the end of the week (Monday-first, as the ranges are)')
@@ -74,10 +73,10 @@ check('the shared constant stays empty, so no default is frozen at import', () =
 
 console.log('deadline proximity (the board colours it)')
 check('day differences count whole days either way', () => {
-  assert.equal(daysBetweenKeys('2026-09-16', '2026-09-16'), 0)
-  assert.equal(daysBetweenKeys('2026-09-16', '2026-09-19'), 3)
-  assert.equal(daysBetweenKeys('2026-09-16', '2026-09-15'), -1)
-  assert.equal(daysBetweenKeys('2026-09-30', '2026-10-02'), 2, 'across a month boundary')
+  assert.equal(daysBetween('2026-09-16', '2026-09-16'), 0)
+  assert.equal(daysBetween('2026-09-16', '2026-09-19'), 3)
+  assert.equal(daysBetween('2026-09-16', '2026-09-15'), -1)
+  assert.equal(daysBetween('2026-09-30', '2026-10-02'), 2, 'across a month boundary')
 })
 check('the bands are today, three days, a week, then beyond', () => {
   const today = '2026-09-16'
@@ -89,8 +88,20 @@ check('the bands are today, three days, a week, then beyond', () => {
   assert.equal(dueLevelOf('2026-09-23', today), 'week', 'seven days out is the edge')
   assert.equal(dueLevelOf('2026-09-24', today), 'far', 'eight days out is unremarkable')
 })
-check('a fractional count keeps one decimal and drops a trailing .0', () => {
-  assert.equal(fractionText(5), '5')
+check('a band is decided by the habit day, not by the calendar date', () => {
+  // 01:30 on the 17th still belongs to the habit day of the 16th (night tail),
+  // and that is the day the band must be measured from — the focus overlay used
+  // to pass the local calendar date here and colour tomorrow's task as 今天.
+  const nightTail = new Date('2026-09-17T01:30:00')
+  const habitDay = habitDayKey(nightTail, { dayStartHour: 4 })
+  assert.equal(habitDay, '2026-09-16')
+  assert.equal(dueLevelOf('2026-09-17', habitDay), 'soon', 'due tomorrow is not due today')
+  assert.equal(dueLevelOf('2026-09-17', '2026-09-17'), 'today', 'and the calendar date would have said otherwise')
+})
+check('with no habit day yet, nothing reads as urgent', () => {
+  assert.equal(dueLevelOf('2026-09-16', ''), 'far', 'an unanswered clock must not paint every deadline red')
+})
+check('a fractional count keeps one decimal and drops a trailing .0', () => {  assert.equal(fractionText(5), '5')
   assert.equal(fractionText(5.25), '5.3', 'rounded to one decimal, not truncated')
   assert.equal(fractionText(4.0), '4')
   assert.equal(fractionText(0.5), '0.5')

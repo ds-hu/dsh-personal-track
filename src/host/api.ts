@@ -15,8 +15,8 @@ import { z } from 'zod'
 import { ApiError } from './api-error.ts'
 import type { Backup } from './backup.ts'
 import type { Config, DayBoundary } from './config.ts'
-import { habitDayKey, instantForHabitDay, type DayKey } from './daykey.ts'
-import { BACKUP_BODY_LIMIT, ASSET_BODY_LIMIT, MATERIAL_BODY_LIMIT, handlers, type BinaryResult, type RouteCtx } from './routes.ts'
+import { habitDayKey, instantForHabitDay, type DayKey } from '../shared/habit-day.ts'
+import { BACKUP_BODY_LIMIT, ASSET_BODY_LIMIT, MATERIAL_BODY_LIMIT, handlers, type BinaryResult, type RouteCtx, type StateAnswer } from './routes.ts'
 import type { HabitStore } from './store.ts'
 import { API_PREFIX, routes, type RouteName } from '../shared/route.ts'
 
@@ -193,7 +193,7 @@ export function createApiHandler(deps: ApiDeps): HabitHandler {
   }
 
   /** The state slice every mutation answers with. */
-  function stateFor(date: DayKey): Record<string, unknown> {
+  function stateFor(date: DayKey): StateAnswer {
     return { ok: true, ...store.view(date, today()) }
   }
 

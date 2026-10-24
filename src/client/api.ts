@@ -80,7 +80,8 @@ export interface HabitClient {
   editCheck(date: string, habit: CheckHabit, index: number | undefined, time: string): Promise<StateView>
   setMeal(date: string, slot: MealSlot, options?: MealOptions): Promise<StateView>
   clearMeal(date: string, slot: MealSlot): Promise<StateView>
-  setStock(pending: number): Promise<StateView>
+  /** Set the exact stock value; the answer is the day's slice, plus the stock. */
+  setStock(pending: number, viewpoint?: Viewpoint): Promise<StateView>
   /** A wash happened: record it, optionally at a known hour. */
   wash(date: string, pieces: number, time?: string): Promise<StateView>
   /** Append one session; the host stamps `at` and assigns the id. */
@@ -90,13 +91,18 @@ export interface HabitClient {
   setVocabTarget(date: string, target: VocabTarget): Promise<StateView>
   setRun(date: string, options: RunOptions): Promise<StateView>
   clearRun(date: string): Promise<StateView>
-  /** Registries: the lists are global, so these answer with the list itself. */
-  addMedia(input: MediaInput): Promise<MediaResult>
-  patchMedia(id: string, patch: MediaPatch): Promise<MediaResult>
-  removeMedia(id: string): Promise<MediaResult>
-  addTask(input: TaskInput): Promise<TaskResult>
-  patchTask(id: string, patch: TaskPatch): Promise<TaskResult>
-  removeTask(id: string): Promise<TaskResult>
+  /**
+   * Registries: the lists are global, the answer is a habit day's slice.
+   *
+   * `viewpoint` is the day the caller is showing, so the answer can be adopted
+   * without a second read; omit it for today.
+   */
+  addMedia(input: MediaInput, viewpoint?: Viewpoint): Promise<EntryAnswer>
+  patchMedia(id: string, patch: MediaPatch, viewpoint?: Viewpoint): Promise<EntryAnswer>
+  removeMedia(id: string, viewpoint?: Viewpoint): Promise<RemovedAnswer>
+  addTask(input: TaskInput, viewpoint?: Viewpoint): Promise<EntryAnswer>
+  patchTask(id: string, patch: TaskPatch, viewpoint?: Viewpoint): Promise<EntryAnswer>
+  removeTask(id: string, viewpoint?: Viewpoint): Promise<RemovedAnswer>
   /**
    * Where an `<img src>` points for one stored image.
    *
@@ -106,25 +112,30 @@ export interface HabitClient {
    */
   assetUrl(assetId: string): string
   /** Store an image and append it to an entry's materials. */
-  addImageMaterial(owner: RegistryKind, id: string, image: ImageInput): Promise<EntryResult>
+  addImageMaterial(owner: RegistryKind, id: string, image: ImageInput, viewpoint?: Viewpoint): Promise<EntryAnswer>
   /** Append a Markdown text block to an entry's materials. */
-  addTextMaterial(owner: RegistryKind, id: string, text: string): Promise<EntryResult>
+  addTextMaterial(owner: RegistryKind, id: string, text: string, viewpoint?: Viewpoint): Promise<EntryAnswer>
   /** Rewrite one Markdown block's text. */
-  patchTextMaterial(owner: RegistryKind, id: string, materialId: string, text: string): Promise<EntryResult>
+  patchTextMaterial(owner: RegistryKind, id: string, materialId: string, text: string, viewpoint?: Viewpoint): Promise<EntryAnswer>
   /** Remove one material; an image takes its stored bytes with it. */
-  removeMaterial(owner: RegistryKind, id: string, materialId: string): Promise<EntryResult>
+  removeMaterial(owner: RegistryKind, id: string, materialId: string, viewpoint?: Viewpoint): Promise<EntryAnswer>
   /** Delete every stored image nothing references. */
   sweepAssets(): Promise<SweepResult>
   /** Open a focus session; a session a crash left open is dropped first. */
-  startFocus(owner: RegistryKind, id: string): Promise<FocusStartResult>
-  /** Close one focus session; an already-closed one is left alone. */
-  endFocus(owner: RegistryKind, id: string, sessionId: string, options?: EndFocusOptions): Promise<EntryResult>
+  startFocus(owner: RegistryKind, id: string, viewpoint?: Viewpoint): Promise<FocusAnswer>
+  /**
+   * Close one focus session; an already-closed one is left alone.
+   *
+   * No viewpoint: the overlay that calls this adopts the answer's `entry` only,
+   * so the day the slice describes does not concern it.
+   */
+  endFocus(owner: RegistryKind, id: string, sessionId: string, options?: EndFocusOptions): Promise<EntryAnswer>
   /** Range aggregates, computed on the host. */
   stats(from: string, to: string): Promise<StatsView>
   /** The whole domain as one portable document. */
   exportAll(): Promise<BackupBundle>
   /** Validate and apply a backup document; `replace` also drops what it omits. */
-  importAll(mode: ImportMode, backup: unknown): Promise<ImportResult>
+  importAll(mode: ImportMode, backup: unknown, viewpoint?: Viewpoint): Promise<ImportResult>
 }
 
 /** Fields a new media entry carries. */
@@ -173,37 +184,40 @@ export interface TaskPatch {
   readonly notes?: string | null
 }
 
-/** The media list a registry call answers with, plus the entry it changed. */
-export interface MediaResult {
-  readonly ok: true
-  readonly media: readonly MediaEntry[]
-  /**
-   * The changed entry in the state slice's shape — the same shape as the one in
-   * `media`, not the bare stored record: an image material carries the mime and
-   * the byte size derived from its asset, and the entry carries its derived
-   * `focusSeconds`. Focus mode adopts this whole, so a record here would show
-   * up as missing images and a zero focus total.
-   */
-  readonly entry?: MediaEntry
+/**
+ * Which habit day a write's answer should describe.
+ *
+ * A registry entry belongs to no habit day, but the board is showing one, so it
+ * sends that day up and adopts the answer directly instead of asking again
+ * (docs/adr/0004-write-answers-the-day-slice.md). Omitted means today.
+ */
+export interface Viewpoint {
+  readonly date?: string
 }
 
-/** The task list a registry call answers with, plus the entry it changed. */
-export interface TaskResult {
-  readonly ok: true
-  readonly tasks: readonly TaskEntry[]
-  /** The changed entry in the state slice's shape — see {@link MediaResult.entry}. */
-  readonly entry?: TaskEntry
+/**
+ * A write's answer: the day's state slice, plus the entry it changed.
+ *
+ * Every mutation answers this shape — the day, the stock and both registries —
+ * so there is one adoption path, not one per route family. The entry is the
+ * state slice's shape and not the stored record: an image material carries the
+ * mime and the byte size derived from its asset, and the entry carries its
+ * derived `focusSeconds`, so adopting a record would show up as missing images
+ * and a zero focus total. Focus mode adopts this whole, which is why the
+ * distinction is stated here.
+ */
+export interface EntryAnswer extends StateView {
+  /** The changed entry, in the state slice's shape. */
+  readonly entry?: TaskEntry | MediaEntry
 }
 
-/** What a material or focus call answers with: the entry it changed. */
-export interface EntryResult {
-  readonly ok: true
-  /** The changed entry in the state slice's shape, as the lists carry it. */
-  readonly entry: TaskEntry | MediaEntry
+/** A delete's answer: the day's slice, plus whether anything was actually there. */
+export interface RemovedAnswer extends StateView {
+  readonly removed: boolean
 }
 
-/** What opening a focus session answers with. */
-export interface FocusStartResult extends EntryResult {
+/** Opening a focus session answers with the entry *and* the session it opened. */
+export interface FocusAnswer extends EntryAnswer {
   /** The session just opened, so the caller can close exactly that one. */
   readonly sessionId: string
 }
@@ -309,6 +323,24 @@ export function createHabitClient(options: HabitClientOptions = {}): HabitClient
     throw staleHostError()
   }
 
+  /**
+   * A payload with the caller's **viewpoint** folded in.
+   *
+   * The day is optional the whole way down: a call that does not name one is
+   * answered for today, which is what the focus overlay's own writes want.
+   */
+  const withDay = (
+    viewpoint: Viewpoint | undefined,
+    payload: object,
+  ): Record<string, unknown> =>
+    (viewpoint?.date === undefined
+      ? { ...payload }
+      : { ...payload, date: viewpoint.date })
+
+  /** The same for a query-addressed route; absent means "today", not "undefined". */
+  const dayQuery = (viewpoint: Viewpoint | undefined): { date?: string } =>
+    (viewpoint?.date === undefined ? {} : { date: viewpoint.date })
+
   return {
     clock: async () => {
       const value = await request<ClockView>(url('clock'))
@@ -341,7 +373,10 @@ export function createHabitClient(options: HabitClientOptions = {}): HabitClient
       url('clearMeal', { date, slot }),
       { method: routes.clearMeal.method },
     ),
-    setStock: pending => request<StateView>(url('laundryStock'), body('laundryStock', { pending })),
+    setStock: (pending, viewpoint) => request<StateView>(
+      url('laundryStock'),
+      body('laundryStock', withDay(viewpoint, { pending })),
+    ),
     wash: (date, pieces, time) => request<StateView>(url('laundryWash'), body('laundryWash', {
       date,
       pieces,
@@ -359,26 +394,41 @@ export function createHabitClient(options: HabitClientOptions = {}): HabitClient
     ),
     setRun: (date, run) => request<StateView>(url('setRun'), body('setRun', { date, ...run })),
     clearRun: date => request<StateView>(url('clearRun', { date }), { method: routes.clearRun.method }),
-    addMedia: input => request<MediaResult>(url('addMedia'), body('addMedia', input)),
-    patchMedia: (id, patch) => request<MediaResult>(url('patchMedia'), body('patchMedia', { id, patch })),
-    removeMedia: id => request<MediaResult>(url('removeMedia', { id }), { method: routes.removeMedia.method }),
-    addTask: input => request<TaskResult>(url('addTask'), body('addTask', input)),
-    patchTask: (id, patch) => request<TaskResult>(url('patchTask'), body('patchTask', { id, patch })),
-    removeTask: id => request<TaskResult>(url('removeTask', { id }), { method: routes.removeTask.method }),
+    addMedia: (input, viewpoint) =>
+      request<EntryAnswer>(url('addMedia'), body('addMedia', withDay(viewpoint, input))),
+    patchMedia: (id, patch, viewpoint) =>
+      request<EntryAnswer>(url('patchMedia'), body('patchMedia', withDay(viewpoint, { id, patch }))),
+    removeMedia: (id, viewpoint) => request<RemovedAnswer>(
+      url('removeMedia', { id, ...dayQuery(viewpoint) }),
+      { method: routes.removeMedia.method },
+    ),
+    addTask: (input, viewpoint) =>
+      request<EntryAnswer>(url('addTask'), body('addTask', withDay(viewpoint, input))),
+    patchTask: (id, patch, viewpoint) =>
+      request<EntryAnswer>(url('patchTask'), body('patchTask', withDay(viewpoint, { id, patch }))),
+    removeTask: (id, viewpoint) => request<RemovedAnswer>(
+      url('removeTask', { id, ...dayQuery(viewpoint) }),
+      { method: routes.removeTask.method },
+    ),
     assetUrl: assetId => url('asset', { id: assetId }),
-    addImageMaterial: (owner, id, image) => request<EntryResult>(url('addAsset'), body('addAsset', {
-      kind: owner,
-      id,
-      mime: image.mime,
-      data: image.data,
-      ...(image.name === undefined ? {} : { name: image.name }),
-    })),
-    addTextMaterial: (owner, id, text) =>
-      request<EntryResult>(url('addMaterial'), body('addMaterial', { kind: owner, id, text })),
-    patchTextMaterial: (owner, id, materialId, text) =>
-      request<EntryResult>(url('patchMaterial'), body('patchMaterial', { kind: owner, id, materialId, text })),
-    removeMaterial: (owner, id, materialId) => request<EntryResult>(
-      url('removeMaterial', { kind: owner, id, materialId }),
+    addImageMaterial: (owner, id, image, viewpoint) => request<EntryAnswer>(
+      url('addAsset'),
+      body('addAsset', withDay(viewpoint, {
+        kind: owner,
+        id,
+        mime: image.mime,
+        data: image.data,
+        ...(image.name === undefined ? {} : { name: image.name }),
+      })),
+    ),
+    addTextMaterial: (owner, id, text, viewpoint) =>
+      request<EntryAnswer>(url('addMaterial'), body('addMaterial', withDay(viewpoint, { kind: owner, id, text }))),
+    patchTextMaterial: (owner, id, materialId, text, viewpoint) => request<EntryAnswer>(
+      url('patchMaterial'),
+      body('patchMaterial', withDay(viewpoint, { kind: owner, id, materialId, text })),
+    ),
+    removeMaterial: (owner, id, materialId, viewpoint) => request<EntryAnswer>(
+      url('removeMaterial', { kind: owner, id, materialId, ...dayQuery(viewpoint) }),
       { method: routes.removeMaterial.method },
     ),
     sweepAssets: async () => {
@@ -386,12 +436,15 @@ export function createHabitClient(options: HabitClientOptions = {}): HabitClient
       if (typeof value.removed !== 'number') staleHost()
       return value
     },
-    startFocus: async (owner, id) => {
-      const value = await request<FocusStartResult>(url('focusStart'), body('focusStart', { kind: owner, id }))
+    startFocus: async (owner, id, viewpoint) => {
+      const value = await request<FocusAnswer>(
+        url('focusStart'),
+        body('focusStart', withDay(viewpoint, { kind: owner, id })),
+      )
       if (typeof value.sessionId !== 'string') staleHost()
       return value
     },
-    endFocus: (owner, id, sessionId, options) => request<EntryResult>(
+    endFocus: (owner, id, sessionId, options) => request<EntryAnswer>(
       url('focusEnd'),
       {
         ...body('focusEnd', { kind: owner, id, sessionId }),
@@ -405,6 +458,7 @@ export function createHabitClient(options: HabitClientOptions = {}): HabitClient
       if (value.backup === undefined) staleHost()
       return value.backup
     },
-    importAll: (mode, backup) => request<ImportResult>(url('importBackup'), body('importBackup', { mode, backup })),
+    importAll: (mode, backup, viewpoint) =>
+      request<ImportResult>(url('importBackup'), body('importBackup', withDay(viewpoint, { mode, backup }))),
   }
 }

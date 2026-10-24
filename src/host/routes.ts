@@ -15,17 +15,16 @@
 import { z } from 'zod'
 import { BackupFormatError, type Backup, type ImportMode } from './backup.ts'
 import type { Config, DayBoundary } from './config.ts'
-import { dayKeySpan, habitDayKey, instantForHabitDay, isNightTail, type DayKey } from './daykey.ts'
+import { dayKeySpan, isNightTail, type DayKey } from '../shared/habit-day.ts'
+import { CHECK_HABITS, MEAL_SLOTS } from './habits.ts'
 import { mediaRecord, taskRecord } from './domain.ts'
 import { ApiError } from './api-error.ts'
 import { buildStats } from './stats.ts'
 import {
   base64Bytes,
   type HabitStore,
-  type MediaView,
   type SessionKind,
   type StateView,
-  type TaskView,
 } from './store.ts'
 import type { RouteName } from '../shared/route.ts'
 import { MAX_IMAGE_BYTES } from '../shared/route.ts'
@@ -42,7 +41,7 @@ export interface RouteCtx {
   /** The current habit day. */
   readonly today: () => DayKey
   /** The state slice every mutation answers with. */
-  readonly stateFor: (date: DayKey) => Record<string, unknown>
+  readonly stateFor: (date: DayKey) => StateAnswer
   /** Parse with zod, or fail as a 400. */
   readonly parse: <T extends z.ZodType>(schema: T, value: unknown, what: string) => z.infer<T>
   /** Date from body/query, else the current habit day. */
@@ -54,7 +53,7 @@ export interface RouteCtx {
 }
 
 /** A body to answer with; the transport decides the status line. */
-export type RouteResult = Record<string, unknown> | BinaryResult
+export type RouteResult = Record<string, unknown> | StateAnswer | BinaryResult
 
 /**
  * A route that answers with bytes instead of a JSON body.
@@ -125,34 +124,21 @@ const imageData = z.string().min(1).refine(
   '图片超过上限',
 )
 
+/** The one shape a write answers with: `ok` plus the **习惯日** slice. */
+export type StateAnswer = StateView & { readonly ok: true }
+
 /**
- * One registry read, shared by every answer built from a mutation.
+ * One write's answer: the **习惯日** slice it was addressed with, plus extras.
  *
- * The list and the entry come out of a single slice, so two fields of one
- * response can never disagree about what was just written.
- */
-function registryView(
-  ctx: RouteCtx,
-  kind: 'task' | 'media',
-  id: string,
-): { readonly view: StateView; readonly entry: TaskView | MediaView | undefined } {
-  const view = ctx.store.view(ctx.today(), ctx.today())
-  return {
-    view,
-    entry: kind === 'task'
-      ? view.tasks.find(entry => entry.id === id)
-      : view.media.find(entry => entry.id === id),
-  }
-}
-
-/** The registry entry a material or focus mutation just changed. */
-function entryOf(ctx: RouteCtx, kind: 'task' | 'media', id: string): unknown {
-  return registryView(ctx, kind, id).entry
-}
-
-/**
- * One registry write's answer: the refreshed list plus the entry it changed,
- * both in the **view**'s shape.
+ * Every mutation in this table answers this way — one shape, one adoption path
+ * on the client — and a write that changes a registry entry additionally names
+ * the entry it changed.
+ *
+ * The day is the caller's **viewpoint**, not necessarily today: a registry entry
+ * belongs to no habit day, but the answer is the slice of the day the client is
+ * looking at, so it can adopt it without a second read. The slice is read once
+ * and the entry is carved out of it, so two fields of one response can never
+ * disagree about what was just written.
  *
  * The entry is the view and never the stored record. A record carries neither
  * the mime nor the byte size of an image material — both are derived from the
@@ -161,16 +147,37 @@ function entryOf(ctx: RouteCtx, kind: 'task' | 'media', id: string): unknown {
  * missing and its focus time as no time at all. That is not hypothetical: it is
  * what dragging focus mode's progress bar used to do.
  */
-function registryAnswer(ctx: RouteCtx, kind: 'task' | 'media', id: string): Record<string, unknown> {
-  const { view, entry } = registryView(ctx, kind, id)
-  return kind === 'task'
-    ? { ok: true, tasks: view.tasks, entry }
-    : { ok: true, media: view.media, entry }
+function writeAnswer(
+  ctx: RouteCtx,
+  date: DayKey,
+  changed?: { readonly kind: 'task' | 'media'; readonly id: string },
+): Record<string, unknown> {
+  const answer = ctx.stateFor(date)
+  if (changed === undefined) return { ...answer }
+  const entry = changed.kind === 'task'
+    ? answer.tasks.find(candidate => candidate.id === changed.id)
+    : answer.media.find(candidate => candidate.id === changed.id)
+  return { ...answer, entry }
 }
 
 const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD')
 const ISO = z.string().min(1)
-const SLOT = z.enum(['breakfast', 'lunch', 'dinner'])
+/** The meal **槽位** the wire accepts, named by the habit inventory. */
+const SLOT = z.enum(MEAL_SLOTS)
+/** The habits a **打卡** addresses, named by the same inventory. */
+const CHECKED = z.enum(CHECK_HABITS)
+
+/**
+ * A write's **viewpoint**: which habit day its answer should describe.
+ *
+ * A **登记** entry belongs to no habit day, so a registry write is not addressed
+ * to one — but its answer is a state slice, and the client is showing *a day*.
+ * Sending that day up means every write answers the thing the caller can adopt
+ * without a second read (docs/adr/0004-write-answers-the-day-slice.md). Absent
+ * means today, which is what a caller that does not care about the viewpoint
+ * gets.
+ */
+const VIEWPOINT = { date: DATE.optional() }
 
 /** Per-kind session entry schemas; `at` is stamped by the server when absent. */
 const sessionSchemas = {
@@ -276,7 +283,7 @@ export const handlers: Record<RouteName, RouteHandler> = {
   async check(ctx, body) {
     const raw = ctx.parse(z.object({
       date: DATE.optional(),
-      habit: z.enum(['wash', 'shower']),
+      habit: CHECKED,
       /** Optional clock time, for backfilling at a known hour. */
       time: z.string().optional(),
       at: ISO.optional(),
@@ -284,23 +291,16 @@ export const handlers: Record<RouteName, RouteHandler> = {
     const date = ctx.dateOf(raw, ctx.today())
     const resolved = ctx.resolveAt(raw, date)
     const at = typeof resolved.at === 'string' ? resolved.at : ctx.iso()
-    if (raw.habit === 'wash') {
-      const current = ctx.store.readDay(date)?.washes.times.length ?? 0
-      if (current >= 2) throw new ApiError(409, 'habit/check-limit', '洗漱每日至多两次')
-      await ctx.store.mutateDay(date, day => ({
-        ...day,
-        washes: { times: [...day.washes.times, at] },
-      }))
-    } else {
-      await ctx.store.mutateDay(date, day => ({ ...day, shower: { at } }))
-    }
+    // The daily cap, the default index and "no such check" all live inside the
+    // store's atomic write; the route only resolves the day and the instant.
+    await ctx.store.addCheck(date, raw.habit, at)
     return ctx.stateFor(date)
   },
 
   async editCheck(ctx, body) {
     const raw = ctx.parse(z.object({
       date: DATE.optional(),
-      habit: z.enum(['wash', 'shower']),
+      habit: CHECKED,
       /** Which recorded check to retime; defaults to the most recent. */
       index: z.number().int().nonnegative().optional(),
       time: z.string().optional(),
@@ -310,39 +310,23 @@ export const handlers: Record<RouteName, RouteHandler> = {
     const resolved = ctx.resolveAt(raw, date)
     const at = resolved.at
     if (typeof at !== 'string') throw new ApiError(400, 'habit/bad-request', '需要 time 或 at')
-    const existing = ctx.store.readDay(date)
-    if (raw.habit === 'wash') {
-      const times = existing?.washes.times ?? []
-      const index = raw.index ?? times.length - 1
-      if (index < 0 || index >= times.length) {
-        throw new ApiError(404, 'habit/not-found', '没有这条打卡')
-      }
-      await ctx.store.mutateDay(date, day => ({
-        ...day,
-        washes: { times: day.washes.times.map((entry, position) => (position === index ? at : entry)) },
-      }))
-    } else {
-      if (existing?.shower.at == null) throw new ApiError(404, 'habit/not-found', '洗澡尚未打卡')
-      await ctx.store.mutateDay(date, day => ({ ...day, shower: { at } }))
-    }
+    // Which record to retime — and whether it exists at all — is the store's
+    // decision, taken inside the same atomic write that applies the new instant.
+    await ctx.store.retimeCheck(date, raw.habit, at, raw.index)
     return ctx.stateFor(date)
   },
 
   async uncheck(ctx, _body, query) {
     const body = ctx.parse(z.object({
       date: DATE.optional(),
-      habit: z.enum(['wash', 'shower']),
+      habit: CHECKED,
       /** Which recorded check to drop; defaults to the most recent one. */
       index: z.coerce.number().int().nonnegative().optional(),
     }), query, 'check')
     const date = ctx.dateOf(body, ctx.today())
-    await ctx.store.mutateDay(date, (day) => {
-      if (body.habit !== 'wash') return { ...day, shower: { at: null } }
-      const times = [...day.washes.times]
-      const index = body.index ?? times.length - 1
-      if (index >= 0 && index < times.length) times.splice(index, 1)
-      return { ...day, washes: { times } }
-    })
+    // Removing a check that is already gone is not a fault (a second click, or
+    // the same delete from two windows), so this answers 200 either way.
+    await ctx.store.removeCheck(date, body.habit, body.index)
     return ctx.stateFor(date)
   },
 
@@ -472,9 +456,11 @@ export const handlers: Record<RouteName, RouteHandler> = {
     const raw = ctx.parse(z.object({
       pending: z.number().int().nonnegative(),
       at: ISO.optional(),
+      ...VIEWPOINT,
     }), body, 'laundry stock')
+    const date = ctx.dateOf(raw, ctx.today())
     const stock = await ctx.store.setStock(raw.pending, raw.at ?? ctx.iso())
-    return { ...ctx.stateFor(ctx.today()), stock }
+    return { ...ctx.stateFor(date), stock }
   },
 
   // --- backup --------------------------------------------------------------
@@ -489,7 +475,9 @@ export const handlers: Record<RouteName, RouteHandler> = {
        *  drops everything the file does not carry. */
       mode: z.enum(['merge', 'replace']).default('merge'),
       backup: z.unknown(),
+      ...VIEWPOINT,
     }), body, 'backup import')
+    const date = ctx.dateOf(parsed, ctx.today())
     let report
     try {
       report = await ctx.backup.importAll(parsed.backup, parsed.mode as ImportMode)
@@ -499,12 +487,13 @@ export const handlers: Record<RouteName, RouteHandler> = {
       if (cause instanceof BackupFormatError) throw new ApiError(400, 'habit/bad-backup', cause.message)
       throw cause
     }
-    return { ok: true, report, ...ctx.store.view(ctx.today(), ctx.today()) }
+    return { ...writeAnswer(ctx, date), report }
   },
 
   // --- media ---------------------------------------------------------------
 
   async addMedia(ctx, body) {
+    const date = ctx.dateOf(body, ctx.today())
     const raw = ctx.parse(mediaRecord.omit({ id: true, createdAt: true, status: true }).extend({
       status: mediaRecord.shape.status.optional(),
     }), body, 'media')
@@ -515,10 +504,11 @@ export const handlers: Record<RouteName, RouteHandler> = {
       createdAt: ctx.iso(),
     })
     await ctx.store.putMedia(record)
-    return registryAnswer(ctx, 'media', record.id)
+    return writeAnswer(ctx, date, { kind: 'media', id: record.id })
   },
 
   async patchMedia(ctx, body) {
+    const date = ctx.dateOf(body, ctx.today())
     const outer = ctx.parse(z.object({ id: z.string().min(1), patch: z.unknown() }), body, 'media patch')
     // `null` clears an optional field; an absent key leaves it alone.
     const patch = ctx.parse(z.object({
@@ -531,18 +521,20 @@ export const handlers: Record<RouteName, RouteHandler> = {
       notes: z.string().nullable().optional(),
     }), outer.patch, 'media patch')
     const entry = await ctx.store.patchMedia(outer.id, patch)
-    return registryAnswer(ctx, 'media', entry.id)
+    return writeAnswer(ctx, date, { kind: 'media', id: entry.id })
   },
 
   async removeMedia(ctx, _body, query) {
-    const body = ctx.parse(z.object({ id: z.string().min(1) }), query, 'media delete')
+    const body = ctx.parse(z.object({ id: z.string().min(1), ...VIEWPOINT }), query, 'media delete')
+    const date = ctx.dateOf(body, ctx.today())
     const removed = await ctx.store.deleteMedia(body.id)
-    return { ok: true, removed, media: ctx.store.view(ctx.today(), ctx.today()).media }
+    return { ...writeAnswer(ctx, date), removed }
   },
 
   // --- tasks ---------------------------------------------------------------
 
   async addTask(ctx, body) {
+    const date = ctx.dateOf(body, ctx.today())
     // Checkpoints travel as content only (`label` + `at`); ids are storage's
     // business, so this half assigns them before the record is parsed.
     const checkpointInput = z.object({
@@ -562,10 +554,11 @@ export const handlers: Record<RouteName, RouteHandler> = {
       checkpoints: (raw.checkpoints ?? []).map(line => ({ ...line, id: ctx.store.newId() })),
     })
     await ctx.store.putTask(record)
-    return registryAnswer(ctx, 'task', record.id)
+    return writeAnswer(ctx, date, { kind: 'task', id: record.id })
   },
 
   async patchTask(ctx, body) {
+    const date = ctx.dateOf(body, ctx.today())
     const outer = ctx.parse(z.object({ id: z.string().min(1), patch: z.unknown() }), body, 'task patch')
     // `null` clears an optional field; `progress` merges field by field. A
     // checkpoint list replaces wholesale (an empty list clears them all).
@@ -584,13 +577,14 @@ export const handlers: Record<RouteName, RouteHandler> = {
       notes: z.string().nullable().optional(),
     }), outer.patch, 'task patch')
     const entry = await ctx.store.patchTask(outer.id, patch)
-    return registryAnswer(ctx, 'task', entry.id)
+    return writeAnswer(ctx, date, { kind: 'task', id: entry.id })
   },
 
   async removeTask(ctx, _body, query) {
-    const body = ctx.parse(z.object({ id: z.string().min(1) }), query, 'task delete')
+    const body = ctx.parse(z.object({ id: z.string().min(1), ...VIEWPOINT }), query, 'task delete')
+    const date = ctx.dateOf(body, ctx.today())
     const removed = await ctx.store.deleteTask(body.id)
-    return { ok: true, removed, tasks: ctx.store.view(ctx.today(), ctx.today()).tasks }
+    return { ...writeAnswer(ctx, date), removed }
   },
 
   // --- materials: the ordered text/image stream on a registry entry --------
@@ -613,18 +607,27 @@ export const handlers: Record<RouteName, RouteHandler> = {
 
   async addAsset(ctx, body) {
     const raw = ctx.parse(ownerTarget.extend({
+      ...VIEWPOINT,
       mime: z.string().min(1).max(128),
       data: imageData,
       name: z.string().max(256).optional(),
     }), body, 'asset')
+    const date = ctx.dateOf(raw, ctx.today())
     await ctx.store.addMaterialImage(raw.kind, raw.id, {
       mime: raw.mime,
       data: raw.data,
       ...(raw.name === undefined ? {} : { name: raw.name }),
     })
-    return { ok: true, entry: entryOf(ctx, raw.kind, raw.id) }
+    return writeAnswer(ctx, date, { kind: raw.kind, id: raw.id })
   },
 
+  /**
+   * The one write that answers no slice.
+   *
+   * It reclaims orphaned bytes: no habit day and no entry is changed, so there
+   * is nothing for a slice to describe. Answering one anyway would imply the
+   * client should re-render a day nothing touched.
+   */
   async sweepAssets(ctx) {
     const removed = await ctx.store.sweepOrphanAssets()
     return { ok: true, removed }
@@ -632,42 +635,51 @@ export const handlers: Record<RouteName, RouteHandler> = {
 
   async addMaterial(ctx, body) {
     const raw = ctx.parse(ownerTarget.extend({
+      ...VIEWPOINT,
       text: z.string().max(MAX_MATERIAL_CHARS),
     }), body, 'material')
+    const date = ctx.dateOf(raw, ctx.today())
     await ctx.store.addMaterialText(raw.kind, raw.id, raw.text)
-    return { ok: true, entry: entryOf(ctx, raw.kind, raw.id) }
+    return writeAnswer(ctx, date, { kind: raw.kind, id: raw.id })
   },
 
   async patchMaterial(ctx, body) {
     const raw = ctx.parse(ownerTarget.extend({
+      ...VIEWPOINT,
       materialId: z.string().min(1),
       text: z.string().max(MAX_MATERIAL_CHARS),
     }), body, 'material patch')
+    const date = ctx.dateOf(raw, ctx.today())
     await ctx.store.patchMaterialText(raw.kind, raw.id, raw.materialId, raw.text)
-    return { ok: true, entry: entryOf(ctx, raw.kind, raw.id) }
+    return writeAnswer(ctx, date, { kind: raw.kind, id: raw.id })
   },
 
   async removeMaterial(ctx, _body, query) {
     const raw = ctx.parse(ownerTarget.extend({
+      ...VIEWPOINT,
       materialId: z.string().min(1),
     }), query, 'material delete')
+    const date = ctx.dateOf(raw, ctx.today())
     await ctx.store.removeMaterial(raw.kind, raw.id, raw.materialId)
-    return { ok: true, entry: entryOf(ctx, raw.kind, raw.id) }
+    return writeAnswer(ctx, date, { kind: raw.kind, id: raw.id })
   },
 
   // --- focus sessions: instants only, duration derived ---------------------
 
   async focusStart(ctx, body) {
-    const raw = ctx.parse(ownerTarget, body, 'focus')
+    const raw = ctx.parse(ownerTarget.extend(VIEWPOINT), body, 'focus')
+    const date = ctx.dateOf(raw, ctx.today())
     const sessionId = await ctx.store.startFocus(raw.kind, raw.id)
-    return { ok: true, sessionId, entry: entryOf(ctx, raw.kind, raw.id) }
+    return { ...writeAnswer(ctx, date, { kind: raw.kind, id: raw.id }), sessionId }
   },
 
   async focusEnd(ctx, body) {
     const raw = ctx.parse(ownerTarget.extend({
+      ...VIEWPOINT,
       sessionId: z.string().min(1),
     }), body, 'focus end')
+    const date = ctx.dateOf(raw, ctx.today())
     await ctx.store.endFocus(raw.kind, raw.id, raw.sessionId)
-    return { ok: true, entry: entryOf(ctx, raw.kind, raw.id) }
+    return writeAnswer(ctx, date, { kind: raw.kind, id: raw.id })
   },
 }

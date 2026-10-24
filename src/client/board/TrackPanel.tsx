@@ -217,6 +217,7 @@ export function TrackPanel({ client }: TrackPanelProps): JSX.Element {
           client={client}
           target={focused}
           entry={focusedEntry}
+          today={clock?.today ?? ''}
           onClose={closeFocus}
         />
       ) : null}

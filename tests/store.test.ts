@@ -374,4 +374,70 @@ await checkAsync('the view derives task state and overdue from the day it is ask
   assert.equal(store.view(DATE, DATE).tasks[0]!.overdue, false, 'finishing clears overdue')
 })
 
+// --- 打卡: the cap and the record identity, inside the atomic write ----------
+
+await checkAsync('two washing-up checks land, and a third is refused', async () => {
+  const { store } = storeAt()
+  await store.addCheck(DATE, 'wash', '2026-09-16T07:00:00Z')
+  await store.addCheck(DATE, 'wash', '2026-09-16T22:00:00Z')
+  await assert.rejects(() => store.addCheck(DATE, 'wash', '2026-09-16T23:00:00Z'), /至多两次/)
+  assert.deepEqual(store.readDay(DATE)?.washes.times, ['2026-09-16T07:00:00Z', '2026-09-16T22:00:00Z'])
+})
+
+await checkAsync('the cap holds under concurrent check-ins', async () => {
+  // Three writers, one day. Each one's count is the count the previous writer
+  // committed, because the cap sits *inside* the read-modify-write. Lift it back
+  // out (where the route used to keep it) and this records three washes.
+  const { store } = storeAt()
+  const settled = await Promise.allSettled([
+    store.addCheck(DATE, 'wash', 'a'),
+    store.addCheck(DATE, 'wash', 'b'),
+    store.addCheck(DATE, 'wash', 'c'),
+  ])
+  assert.equal(store.readDay(DATE)?.washes.times.length, 2, 'never a third wash')
+  const refused = settled.filter(result => result.status === 'rejected')
+  assert.equal(refused.length, 1, 'exactly one writer is told the day is full')
+  assert.equal((refused[0] as PromiseRejectedResult).reason.code, 'habit/check-limit')
+})
+
+await checkAsync('a day already holding three washes still reads, and cannot grow', async () => {
+  // The race this cap closes could have left such a document behind. A stricter
+  // schema would make it unreadable — which is why the cap is enforced on write
+  // only, and why a deletion is the way back under it.
+  const { store } = storeAt()
+  await store.mutateDay(DATE, day => ({ ...day, washes: { times: ['a', 'b', 'c'] } }))
+  assert.equal(store.readDay(DATE)?.washes.times.length, 3, 'the stored day is still readable')
+  await assert.rejects(() => store.addCheck(DATE, 'wash', 'd'), /至多两次/)
+  await store.removeCheck(DATE, 'wash', 0)
+  assert.equal(store.readDay(DATE)?.washes.times.length, 2, 'one deletion brings it back under the cap')
+})
+
+await checkAsync('a shower is one record, not a list', async () => {
+  const { store } = storeAt()
+  await store.addCheck(DATE, 'shower', '2026-09-16T07:00:00Z')
+  await assert.rejects(() => store.addCheck(DATE, 'shower', '2026-09-16T08:00:00Z'), /至多一次/)
+  assert.equal(store.readDay(DATE)?.shower.at, '2026-09-16T07:00:00Z', 'the first instant stands')
+  await store.removeCheck(DATE, 'shower')
+  assert.equal(store.readDay(DATE)?.shower.at, null)
+})
+
+await checkAsync('retiming addresses a record that must exist', async () => {
+  const { store } = storeAt()
+  await store.addCheck(DATE, 'wash', '2026-09-16T07:00:00Z')
+  await store.addCheck(DATE, 'wash', '2026-09-16T22:00:00Z')
+  const latest = await store.retimeCheck(DATE, 'wash', '2026-09-16T21:00:00Z')
+  assert.deepEqual(latest.washes.times[1], '2026-09-16T21:00:00Z', 'the most recent one, by default')
+  const first = await store.retimeCheck(DATE, 'wash', '2026-09-16T06:00:00Z', 0)
+  assert.deepEqual(first.washes.times, ['2026-09-16T06:00:00Z', '2026-09-16T21:00:00Z'])
+  await assert.rejects(() => store.retimeCheck(DATE, 'wash', 'x', 5), /没有这条打卡/)
+  await assert.rejects(() => store.retimeCheck(DATE, 'shower', 'x'), /洗澡尚未打卡/)
+})
+
+await checkAsync('removing a check that is already gone is a no-op, not a fault', async () => {
+  const { store } = storeAt()
+  await store.removeCheck(DATE, 'wash', 3)
+  await store.removeCheck(DATE, 'shower')
+  assert.equal(store.readDay(DATE)?.washes.times.length, 0)
+})
+
 report()

@@ -141,6 +141,26 @@ await checkAsync('the asset URL names the route the host serves bytes on', async
   assert.equal(client.assetUrl('a1'), `${API_PREFIX}/asset?id=a1`)
 })
 
+await checkAsync('a viewpoint day travels with the write, and today is left unsaid', async () => {
+  const dated = recording({ ok: true, day: { date: '2026-09-01' } })
+  await dated.client.patchTask('t1', { progress: { current: 1 } }, { date: '2026-09-01' })
+  assert.deepEqual(dated.calls[0]!.body, {
+    id: 't1', patch: { progress: { current: 1 } }, date: '2026-09-01',
+  })
+
+  const plain = recording({ ok: true, day: { date: '2026-09-16' } })
+  await plain.client.addTask({ title: '作业' })
+  assert.equal(
+    (plain.calls[0]!.body as Record<string, unknown>).date,
+    undefined,
+    'omitting the viewpoint means today, so nothing is sent',
+  )
+
+  const byQuery = recording({ ok: true, day: { date: '2026-09-01' } })
+  await byQuery.client.removeTask('t1', { date: '2026-09-01' })
+  assert.equal(byQuery.calls[0]!.url, `${API_PREFIX}/tasks?id=t1&date=2026-09-01`)
+})
+
 await checkAsync('a material write carries the owner, the entry and the payload', async () => {
   const { client, calls } = recording({ ok: true, entry: { id: 't1' } })
   await client.addImageMaterial('media', 'm1', { mime: 'image/png', data: 'AA==', name: '长图.png' })

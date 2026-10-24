@@ -1,17 +1,31 @@
 /**
- * Habit-day arithmetic.
+ * Habit-day arithmetic — **the one copy**, shared by both halves.
  *
  * A **habit day** runs from `dayStartHour` local time to the same hour the next
  * calendar day, so 00:00–04:00 belongs to the previous day (the **night tail**).
  * Keys are plain `YYYY-MM-DD` calendar dates and carry no zone of their own:
  * only the moment a key is *derived* depends on the timezone.
+ *
+ * This module lives under `src/shared` because both programs need it: the host
+ * decides which day a write belongs to, and the browser navigates between days
+ * and colours deadlines. It used to be host-only with a hand-written mirror in
+ * `src/client/board/format.ts`, and that mirror is exactly how the focus
+ * overlay came to treat the local calendar date as "today" and disagree with
+ * the board by a day during the night tail
+ * (docs/adr/0005-shared-habit-day.md). It is isomorphic on purpose — `Intl` and
+ * `Date` only, no `node:` imports, no DOM — so the browser bundle can inline it.
  */
-import type { DayBoundary } from './config.ts'
 
 const KEY_RE = /^\d{4}-\d{2}-\d{2}$/
 
 /** A `YYYY-MM-DD` habit-day key. */
 export type DayKey = string
+
+/** The part of the configuration that habit-day arithmetic needs. */
+export interface DayBoundary {
+  readonly dayStartHour: number
+  readonly timezone?: string
+}
 
 /** Formatter for one zone (undefined = host local zone). */
 function dateFormatter(timezone: string | undefined): Intl.DateTimeFormat {
@@ -65,6 +79,23 @@ export function shiftDayKey(key: DayKey, days: number): DayKey {
 /** Ascending key order; negative when `a` is earlier. */
 export function compareDayKeys(a: DayKey, b: DayKey): number {
   return a < b ? -1 : a > b ? 1 : 0
+}
+
+/**
+ * Whole days from `from` to `to`: 0 for the same day, negative when `to` is
+ * earlier.
+ *
+ * The signed counterpart of {@link dayKeySpan}, and the one place the client's
+ * **due band** measures distance from. Parsed and read back in UTC, so no local
+ * zone can shift the count.
+ */
+export function daysBetween(from: DayKey, to: DayKey): number {
+  const at = (key: DayKey): number => {
+    assertDayKey(key)
+    const [year, month, day] = key.split('-').map(Number) as [number, number, number]
+    return Date.UTC(year, month - 1, day)
+  }
+  return Math.round((at(to) - at(from)) / 86_400_000)
 }
 
 /** Every key from `from` to `to`, inclusive and ascending (empty when reversed). */

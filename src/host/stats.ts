@@ -8,7 +8,8 @@
  * no matter how many figures are derived from it.
  */
 import { focusSeconds, paceMinPerKm, streakFor } from './derive.ts'
-import { dayKeyRange, habitDayKey, type DayKey } from './daykey.ts'
+import { HABITS, habitMet, type Habit, type HabitId } from './habits.ts'
+import { dayKeyRange, habitDayKey, type DayKey } from '../shared/habit-day.ts'
 import type { DayBoundary } from './config.ts'
 import type { DayFacts, HabitStore } from './store.ts'
 
@@ -17,7 +18,9 @@ const STREAK_SCAN_DAYS = 400
 
 /** One habit's record across the range. */
 export interface HabitStats {
-  readonly id: string
+  readonly id: HabitId
+  /** The habit's display name — the same string the completion bar uses. */
+  readonly label: string
   readonly met: number
   readonly days: number
   readonly ratio: number
@@ -168,26 +171,24 @@ export function buildStats(
   const dayOfInstant = (instant: string | undefined): DayKey | undefined =>
     instant === undefined ? undefined : habitDayKey(new Date(instant), boundary)
 
-  // --- the seven habits (washing up counts once, against its two-a-day goal)
-  const predicates: readonly { readonly id: string; readonly met: (facts: DayFacts) => boolean }[] = [
-    { id: 'wash', met: facts => facts.day.washes.times.length >= 2 },
-    { id: 'shower', met: facts => facts.day.shower.at !== null },
-    { id: 'breakfast', met: facts => facts.day.meals.breakfast !== undefined },
-    { id: 'lunch', met: facts => facts.day.meals.lunch !== undefined },
-    { id: 'dinner', met: facts => facts.day.meals.dinner !== undefined },
-    { id: 'vocab', met: facts => facts.vocab.met },
-    { id: 'duolingo', met: facts => facts.day.duolingo.length > 0 },
-  ]
+  // --- the seven habits, each met when every cell it owns is full
+  //
+  // The predicate is not restated here: it is the bar's own rule, read off the
+  // facts this range already derives, so 洗漱 (two cells, one habit) counts as
+  // met exactly when both washes happened.
+  const metOn = (habit: Habit, key: DayKey): boolean =>
+    habitMet(habit, id => factsOf(key).cells.find(cell => cell.id === id)?.value ?? 0)
 
-  const habits: HabitStats[] = predicates.map(({ id, met }) => {
-    const perDay = keys.map(key => met(factsOf(key)))
+  const habits: HabitStats[] = HABITS.map((habit) => {
+    const perDay = keys.map(key => metOn(habit, key))
     const metDays = perDay.filter(Boolean).length
     return {
-      id,
+      id: habit.id,
+      label: habit.label,
       met: metDays,
       days: keys.length,
       ratio: keys.length === 0 ? 0 : metDays / keys.length,
-      streak: streakFor(to, key => met(factsOf(key)), STREAK_SCAN_DAYS),
+      streak: streakFor(to, key => metOn(habit, key), STREAK_SCAN_DAYS),
       perDay,
     }
   })

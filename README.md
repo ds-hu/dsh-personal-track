@@ -202,12 +202,13 @@ pnpm verify       # 先构建，再跑客户端 facade + 宿主真实栈端到�
 
 ```
 src/shared/  route.ts（/habit/api 的唯一路由声明：两半身共用 method + path + 图片上限）
+             habit-day.ts（习惯日算术：两半身共用一份，含夜段与到期带的量距）
 src/host/    index.ts（装配）· config.ts（含时间缝线 now）
              api.ts（传输：读 body、查表、映射失败形状，含唯一的二进制响应臂）
              routes.ts（每个路由一个 handler，返回响应体；素材与专注路由也在这里）
-             api-error.ts（统一的失败词汇）· daykey.ts（习惯日算法）
+             api-error.ts（统一的失败词汇）· habits.ts（习惯清单：7 个习惯 / 8 个格）
              domain.ts（zod + 域声明 + assets 表）· derive.ts（派生规则，含专注时长）
-             store.ts（域访问；素材增删、专注会话、级联与孤儿清扫）
+             store.ts（域访问；打卡上限与身份、素材增删、专注会话、级联与孤儿清扫）
              backup.ts（事实文件的读写与校验，v2 带图片、兼容 v1）· stats.ts（范围聚合）
 src/client/  index.tsx（注册面：唯一主面板 + 侧栏入口）· api.ts（命令面，base/fetch 可注入）
              types.ts（线上契约）· styles.ts（注入式样式表，含专注模式与专注栏）
@@ -268,7 +269,7 @@ demo/        focus-mode.html（专注模式的零依赖单文件 demo，与实�
   派生的 `mime` 与字节数，条目带派生的 `focusSeconds`（任务还带 `state`/`overdue`）——与 `/state`
   列表里的条目同一个形状。它一度错发成**存储记录**（`routes.ts` 的 `addTask`/`patchTask` 等直接
   `entry: record`），而专注模式把回包整个当成自己的条目用：拖一下进度条，图片就全被判成「缺失」、
-  累计专注变成 `NaN`。两边现在都由 `registryAnswer` 出这一个形状，客户端的 `isEntryView`
+  累计专注变成 `NaN`。两边现在都由 `writeAnswer` 出这一个形状，客户端的 `isEntryView`
   （`src/client/board/focus.ts`）在采纳前再确认一次——客户端 bundle 热重载而宿主半身未重启时，
   它会提示「插件宿主半身未更新」而不是照着旧形状画。
 - **专注会话要在页面卸载时闭合**：`pagehide` + `endFocus(..., { keepalive: true })`。不闭合的话，
@@ -282,3 +283,15 @@ demo/        focus-mode.html（专注模式的零依赖单文件 demo，与实�
   写入还必须**串行**（`board/write-queue.ts`）：拖动进度条连发几次**绝对值**的写，回包乱序时「最后一个
   响应」并不是最后一次写，采纳它就等于让旧值盖住新值；退出时先 `settled()` 再重读宿主，否则重读会跑在
   最后一次写前面。两件合起来，就是「退出专注后进度条停在 17，切一天或刷新才对」。
+- **写入只有一种答复形状**：它改动的**习惯日 slice**（`day`/`stock`/`tasks`/`media`），外加这次写独有的
+  事实（`entry`、`sessionId`、`removed`、`report`）。**登记**条目不属于任何习惯日，所以那些写接受一个
+  可选的"视点日"（`date`，默认今天）：看板把**它正在看的那一天**送上去，回包就能直接采纳，不必写完
+  再读一次（ADR 0004）。**素材清扫**是唯一例外——它不改任何日，只答 `{ok, removed}`。
+- **习惯清单只有一份**（`src/host/habits.ts`）：7 个习惯拥有 8 个格，"达标"由该习惯名下的格全满派生，
+  所以格条、连续与统计热力网格是同一条规则；wire 上的打卡/餐位枚举与中文标签也取自它。加一个习惯
+  改的是这份清单，`tests/habits.test.ts` 会在任何第二份清单冒出来时变红。
+- **打卡的每日上限在 store 的原子改写内**：先读后写的检查会让两个并发打卡都读到 1、各加一次，
+  落下第三次。上限、默认下标与"没有这条打卡"因此都属于 `addCheck`/`retimeCheck`/`removeCheck`，
+  路由只解析日期与时刻。DELETE 一条已不在的记录是幂等成功，PATCH 一条不存在的记录是 404。
+- **习惯日算术只有一份**（`src/shared/habit-day.ts`）：客户端不再手抄 `shiftKey`，专注模式也不再拿
+  本地日历日当"今天"——夜段里那正是"专注模式显示今天、看板显示 3 天后"的来由（ADR 0005）。

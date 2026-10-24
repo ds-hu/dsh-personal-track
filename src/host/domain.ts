@@ -9,7 +9,7 @@
  */
 import { z } from 'zod'
 import { defineDomain, domainTable, type Domain } from '@deepseek-ai/dsh-storage-domain'
-import type { DayKey } from './daykey.ts'
+import type { DayKey } from '../shared/habit-day.ts'
 
 /** Every session entry carries a stable id so edits never address by index. */
 const sessionId = z.string().min(1)

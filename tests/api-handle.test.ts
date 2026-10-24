@@ -588,4 +588,95 @@ await checkAsync('an unexpected failure is logged and reported as internal', asy
   }
 })
 
+// --- the one answer shape every write shares ---------------------------------
+
+/**
+ * Every write route answers a **习惯日** slice, and this table is the guard.
+ *
+ * One adoption path on the client is what the shape buys: without it a registry
+ * write had to discard the list it was handed and ask for the day a second time.
+ * A route that regresses to a minimal answer fails here, not in the browser.
+ *
+ * `sweepAssets` is the deliberate exception — it reclaims orphaned bytes, so it
+ * changes no day and describes none.
+ */
+await checkAsync('every write answers a habit-day slice', async () => {
+  const api = createHarness()
+  const task = await api.entry('POST', '/tasks', { title: '作业', due: DATE })
+  const taskId = String(task.id)
+  const media = await api.entry('POST', '/media', { kind: 'book', title: '书' })
+  const mediaId = String(media.id)
+  const withBlock = await api.entry('POST', '/material', { kind: 'task', id: taskId, text: '## 要点' })
+  const materialId = (withBlock.materials as { id: string }[])[0]!.id
+  const lesson = await api.state('POST', '/session', { date: DATE, kind: 'duolingo', entry: { minutes: 10 } })
+  const lessonId = ((lesson.day as { day: { duolingo: { id: string }[] } }).day.duolingo[0]!).id
+  const focused = await api.call('POST', '/focus', { kind: 'task', id: taskId })
+  const sessionId = String(focused.body.sessionId)
+  const backup = (await api.call('GET', '/backup')).body.backup
+
+  const writes: readonly { readonly method: string; readonly path: string; readonly body?: unknown }[] = [
+    { method: 'POST', path: '/check', body: { date: DATE, habit: 'wash' } },
+    { method: 'PATCH', path: '/check', body: { date: DATE, habit: 'wash', index: 0, time: '08:00' } },
+    { method: 'DELETE', path: `/check?date=${DATE}&habit=wash&index=0` },
+    { method: 'PUT', path: '/meal', body: { date: DATE, slot: 'lunch', price: 12.5 } },
+    { method: 'DELETE', path: `/meal?date=${DATE}&slot=lunch` },
+    { method: 'POST', path: '/session', body: { date: DATE, kind: 'duolingo', entry: { minutes: 5 } } },
+    { method: 'PATCH', path: '/session', body: { date: DATE, kind: 'duolingo', id: lessonId, patch: { minutes: 6 } } },
+    { method: 'DELETE', path: `/session?date=${DATE}&kind=duolingo&id=${lessonId}` },
+    { method: 'PUT', path: '/run', body: { date: DATE, distanceKm: 5 } },
+    { method: 'DELETE', path: `/run?date=${DATE}` },
+    { method: 'PUT', path: '/vocab-target', body: { date: DATE, new: 1, review: 1 } },
+    { method: 'POST', path: '/laundry/wash', body: { date: DATE, pieces: 1 } },
+    { method: 'PATCH', path: '/laundry/stock', body: { pending: 2, date: DATE } },
+    { method: 'POST', path: '/backup', body: { mode: 'merge', backup } },
+    { method: 'POST', path: '/media', body: { kind: 'book', title: '书二', date: DATE } },
+    { method: 'PATCH', path: '/media', body: { id: mediaId, patch: { notes: '读到第三章' }, date: DATE } },
+    { method: 'DELETE', path: `/media?id=${mediaId}&date=${DATE}` },
+    { method: 'POST', path: '/tasks', body: { title: '作业二', date: DATE } },
+    { method: 'PATCH', path: '/tasks', body: { id: taskId, patch: { progress: { current: 1 } }, date: DATE } },
+    { method: 'POST', path: '/asset', body: { kind: 'task', id: taskId, mime: 'image/png', data: TINY_PNG, date: DATE } },
+    { method: 'POST', path: '/material', body: { kind: 'task', id: taskId, text: '## 第二块', date: DATE } },
+    { method: 'PATCH', path: '/material', body: { kind: 'task', id: taskId, materialId, text: '## 改过', date: DATE } },
+    { method: 'DELETE', path: `/material?kind=task&id=${taskId}&materialId=${materialId}&date=${DATE}` },
+    { method: 'POST', path: '/focus', body: { kind: 'task', id: taskId, date: DATE } },
+    { method: 'PATCH', path: '/focus', body: { kind: 'task', id: taskId, sessionId, date: DATE } },
+    { method: 'DELETE', path: `/tasks?id=${taskId}&date=${DATE}` },
+  ]
+
+  // Collected rather than asserted per route: one regressed route should not
+  // hide the next one's regression.
+  const faults: string[] = []
+  for (const write of writes) {
+    const response = await api.call(write.method, write.path, write.body)
+    const label = `${write.method} ${write.path}`
+    const body = response.body
+    if (response.status !== 200) faults.push(`${label} → ${response.status} ${JSON.stringify(body)}`)
+    else if (body.ok !== true) faults.push(`${label} has no ok envelope`)
+    else if (body.day === undefined) faults.push(`${label} answers no habit day`)
+    else if (body.stock === undefined) faults.push(`${label} answers no stock`)
+    else if (!Array.isArray(body.tasks)) faults.push(`${label} answers no task list`)
+    else if (!Array.isArray(body.media)) faults.push(`${label} answers no media list`)
+  }
+  assert.deepEqual(faults, [], 'every write must answer the day slice it was addressed with')
+
+  const swept = await api.call('POST', '/asset/sweep')
+  assert.equal(swept.status, 200)
+  assert.equal(swept.body.day, undefined, 'the orphan sweep changes no day, so it describes none')
+})
+
+await checkAsync('a registry write answers the day it was sent, not today', async () => {
+  // The board shows one day and must be able to adopt the answer without a
+  // second read, so the viewpoint travels with the write and comes back as the
+  // answered day.
+  const api = createHarness()
+  const task = await api.entry('POST', '/tasks', { title: '作业' })
+  const other = '2026-08-01'
+  const response = await api.call('PATCH', '/tasks', {
+    id: String(task.id), patch: { title: '改名' }, date: other,
+  })
+  assert.equal(response.status, 200)
+  assert.equal((response.body.day as { date: string }).date, other, 'the viewpoint day is the answered day')
+  assert.equal((response.body.entry as { title: string }).title, '改名')
+})
+
 report()

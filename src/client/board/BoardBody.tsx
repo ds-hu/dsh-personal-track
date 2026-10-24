@@ -235,10 +235,19 @@ export function BoardBody({
   })
   const vocabSessions = sessionHandlers('vocab')
 
-  /** Registry writes answer with the list, so re-read the shown day after. */
-  const registryAct = (action: () => Promise<unknown>): void => void act(async () => {
-    await action()
-    return await client.state(date)
+  /**
+   * Registry writes answer with the slice of the day they were sent — the board
+   * passes the day it is showing as the **viewpoint** — so there is nothing to
+   * re-read.
+   *
+   * A host older than this bundle answers with the list alone (the two halves
+   * update separately, and a browser bundle hot reloads while the host needs a
+   * `dsh` restart). Then there is no slice to adopt and the read happens here:
+   * the same value, one round trip later.
+   */
+  const registryAct = (action: () => Promise<StateView>): void => void act(async () => {
+    const answer = await action()
+    return answer.day === undefined ? await client.state(date) : answer
   })
 
   /** Show the copy confirmation for a moment, restarting the timer if due. */
@@ -310,9 +319,9 @@ export function BoardBody({
         <LaundryTile
           pending={pending}
           busy={busy}
-          onDelta={delta => void act(() => client.setStock(Math.max(0, pending + delta)))}
+          onDelta={delta => void act(() => client.setStock(Math.max(0, pending + delta), { date }))}
           onWash={(pieces, time) => void act(() => client.wash(date, pieces, time))}
-          onSet={value => void act(() => client.setStock(value))}
+          onSet={value => void act(() => client.setStock(value, { date }))}
         />
 
         <GroupHeader label="饮食" />
@@ -358,18 +367,18 @@ export function BoardBody({
         <MediaTile
           media={state?.media ?? []}
           busy={busy}
-          onAdd={(input: MediaInput) => registryAct(() => client.addMedia(input))}
-          onPatch={(id, patch: MediaPatch) => registryAct(() => client.patchMedia(id, patch))}
-          onRemove={id => registryAct(() => client.removeMedia(id))}
+          onAdd={(input: MediaInput) => registryAct(() => client.addMedia(input, { date }))}
+          onPatch={(id, patch: MediaPatch) => registryAct(() => client.patchMedia(id, patch, { date }))}
+          onRemove={id => registryAct(() => client.removeMedia(id, { date }))}
           onFocus={onOpenFocus}
         />
         <TaskTile
           tasks={state?.tasks ?? []}
           today={clock.today}
           busy={busy}
-          onAdd={(input: TaskInput) => registryAct(() => client.addTask(input))}
-          onPatch={(id, patch: TaskPatch) => registryAct(() => client.patchTask(id, patch))}
-          onRemove={id => registryAct(() => client.removeTask(id))}
+          onAdd={(input: TaskInput) => registryAct(() => client.addTask(input, { date }))}
+          onPatch={(id, patch: TaskPatch) => registryAct(() => client.patchTask(id, patch, { date }))}
+          onRemove={id => registryAct(() => client.removeTask(id, { date }))}
           onFocus={onOpenFocus}
         />
 

@@ -24,6 +24,7 @@ import type {
   TaskRecord,
 } from './domain.ts'
 import { assetRecord, dayRecord, mediaRecord, taskRecord } from './domain.ts'
+import { habitOf, type CheckHabit } from './habits.ts'
 import {
   cellProgress,
   dayCells,
@@ -37,7 +38,7 @@ import {
   type TaskState,
   type VocabProgress,
 } from './derive.ts'
-import type { DayKey } from './daykey.ts'
+import type { DayKey } from '../shared/habit-day.ts'
 
 /** The laundry stock's key inside the counters table. */
 export const LAUNDRY_KEY = 'laundry'
@@ -148,6 +149,25 @@ export interface HabitStore {
   resolveTarget(key: DayKey): VocabTarget
   view(key: DayKey, today: DayKey): StateView
   mutateDay(key: DayKey, apply: (day: DayRecord) => Record<string, unknown>): Promise<DayRecord>
+  /**
+   * Record one **打卡** at `at`.
+   *
+   * The habit's daily cap is checked **inside** the atomic read-modify-write, so
+   * two concurrent check-ins can never land a third wash: each writer sees the
+   * count the one before it committed, which is exactly what the cap outside the
+   * closure could not do.
+   */
+  addCheck(key: DayKey, habit: CheckHabit, at: string): Promise<DayRecord>
+  /** Retime one recorded **打卡**; `index` defaults to the most recent. */
+  retimeCheck(key: DayKey, habit: CheckHabit, at: string, index?: number): Promise<DayRecord>
+  /**
+   * Remove one recorded **打卡**; `index` defaults to the most recent.
+   *
+   * Idempotent by design: removing something already gone is not a fault (a
+   * second click, or the same delete from two windows), so nothing is thrown —
+   * unlike {@link retimeCheck}, which addresses a record that must exist.
+   */
+  removeCheck(key: DayKey, habit: CheckHabit, index?: number): Promise<DayRecord>
   setVocabTarget(key: DayKey, target: VocabTarget): Promise<DayRecord>
   addSession(key: DayKey, kind: SessionKind, entry: Record<string, unknown>): Promise<DayRecord>
   patchSession(key: DayKey, kind: SessionKind, id: string, patch: Record<string, unknown>): Promise<DayRecord>
@@ -284,6 +304,23 @@ function assertCheckpointsFit(task: TaskRecord): void {
       'a task with checkpoints needs a progress total',
     )
   }
+}
+
+/** The daily cap one 打卡 habit carries, from the habit inventory. */
+function checkLimitOf(habit: CheckHabit): number {
+  return habitOf(habit).maxPerDay ?? 1
+}
+
+/**
+ * What a refused 打卡 says.
+ *
+ * Kept beside the methods rather than in the inventory: the inventory is domain
+ * data, this is the wording of one failure. It is a `Record<CheckHabit, …>`, so
+ * a new 打卡 habit cannot be added without deciding what its refusal reads like.
+ */
+const CHECK_LIMIT_MESSAGE: Record<CheckHabit, string> = {
+  wash: '洗漱每日至多两次',
+  shower: '洗澡每日至多一次',
 }
 
 /** Build the store over an opened domain. */
@@ -500,6 +537,48 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
     async mutateDay(key, apply) {
       await materialize(key)
       return await days.update(key, current => dayRecord.parse(apply(current)))
+    },
+
+    addCheck(key, habit, at) {
+      // The cap lives *inside* the read-modify-write. Outside it, two taps both
+      // read the count before either wrote and a third wash lands — the one
+      // thing this store promises cannot happen.
+      return store.mutateDay(key, (day) => {
+        if (habit === 'shower') {
+          if (day.shower.at !== null) throw new ApiError(409, 'habit/check-limit', CHECK_LIMIT_MESSAGE.shower)
+          return { ...day, shower: { at } }
+        }
+        if (day.washes.times.length >= checkLimitOf(habit)) {
+          throw new ApiError(409, 'habit/check-limit', CHECK_LIMIT_MESSAGE.wash)
+        }
+        return { ...day, washes: { times: [...day.washes.times, at] } }
+      })
+    },
+
+    retimeCheck(key, habit, at, index) {
+      return store.mutateDay(key, (day) => {
+        if (habit === 'shower') {
+          if (day.shower.at === null) throw new ApiError(404, 'habit/not-found', '洗澡尚未打卡')
+          return { ...day, shower: { at } }
+        }
+        const times = day.washes.times
+        const target = index ?? times.length - 1
+        if (target < 0 || target >= times.length) throw new ApiError(404, 'habit/not-found', '没有这条打卡')
+        return {
+          ...day,
+          washes: { times: times.map((instant, position) => (position === target ? at : instant)) },
+        }
+      })
+    },
+
+    removeCheck(key, habit, index) {
+      return store.mutateDay(key, (day) => {
+        if (habit === 'shower') return { ...day, shower: { at: null } }
+        const times = [...day.washes.times]
+        const target = index ?? times.length - 1
+        if (target >= 0 && target < times.length) times.splice(target, 1)
+        return { ...day, washes: { times } }
+      })
     },
 
     setVocabTarget(key, target) {

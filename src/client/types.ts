@@ -311,6 +311,13 @@ export interface ClockView {
 /** One habit's record across a statistics range. */
 export interface HabitStats {
   readonly id: string
+  /**
+   * The habit's display name, from the host's habit inventory.
+   *
+   * Absent when the host half is older than this bundle (it sent the id alone),
+   * which the panel falls back to the id for — the two halves update separately.
+   */
+  readonly label?: string
   readonly met: number
   readonly days: number
   readonly ratio: number

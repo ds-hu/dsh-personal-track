@@ -3,9 +3,12 @@
  *
  * Instants travel as ISO strings and are shown in the browser's local zone;
  * habit-day keys are plain calendar dates and are formatted in UTC so a label
- * can never drift a day. `shiftKey` mirrors the host's key arithmetic — the
- * client navigates dates, but the host still decides what "today" is.
+ * can never drift a day. The calendar arithmetic itself is **not** here: it is
+ * `src/shared/habit-day.ts`, the one copy both halves use, so the board cannot
+ * disagree with the host about which day it is
+ * (docs/adr/0005-shared-habit-day.md).
  */
+import { daysBetween, shiftDayKey } from '../../shared/habit-day.ts'
 import type { FieldSpec } from './fields.tsx'
 
 /** `09:41` in the browser's local zone, or an em dash when unset. */
@@ -75,14 +78,6 @@ export function moneyOf(price: number | undefined): string {
   return `¥${Number.isInteger(price) ? price : price.toFixed(2).replace(/0$/, '')}`
 }
 
-/** Shift a habit-day key by whole days (pure calendar arithmetic). */
-export function shiftKey(key: string, days: number): string {
-  const [year, month, day] = key.split('-').map(Number) as [number, number, number]
-  const moved = new Date(Date.UTC(year, month - 1, day) + days * 86_400_000)
-  const pad = (value: number): string => String(value).padStart(2, '0')
-  return `${moved.getUTCFullYear()}-${pad(moved.getUTCMonth() + 1)}-${pad(moved.getUTCDate())}`
-}
-
 /**
  * The Sunday that ends the week containing `key`.
  *
@@ -93,16 +88,7 @@ export function shiftKey(key: string, days: number): string {
 export function weekEndKey(key: string): string {
   const weekday = new Date(`${key}T12:00:00Z`).getUTCDay()
   const fromMonday = (weekday + 6) % 7
-  return shiftKey(key, 6 - fromMonday)
-}
-
-/** Whole days from `from` to `to`: 0 for the same day, negative when `to` is past. */
-export function daysBetweenKeys(from: string, to: string): number {
-  const at = (key: string): number => {
-    const [year, month, day] = key.split('-').map(Number) as [number, number, number]
-    return Date.UTC(year, month - 1, day)
-  }
-  return Math.round((at(to) - at(from)) / 86_400_000)
+  return shiftDayKey(key, 6 - fromMonday)
 }
 
 /** How close a deadline is, as the board colours it. */
@@ -111,9 +97,14 @@ export type DueLevel = 'overdue' | 'today' | 'soon' | 'week' | 'far'
 /**
  * The band a deadline falls in: past, today, within three days, within a week,
  * or beyond. Bands are counted in whole days from the current habit day.
+ *
+ * With no habit day yet — the host's clock has not answered, or the first read
+ * failed — nothing is urgent: an empty key would otherwise parse as an invalid
+ * date and colour every deadline red.
  */
 export function dueLevelOf(due: string, today: string): DueLevel {
-  const days = daysBetweenKeys(today, due)
+  if (today === '') return 'far'
+  const days = daysBetween(today, due)
   if (days < 0) return 'overdue'
   if (days === 0) return 'today'
   if (days <= 3) return 'soon'

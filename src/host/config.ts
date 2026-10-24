@@ -8,6 +8,16 @@
  * domain (see docs/adr/0002-derived-state-not-stored.md).
  */
 import Schema from '@deepseek-ai/schemastery'
+import type { DayBoundary } from '../shared/habit-day.ts'
+
+/**
+ * The boundary the day-key helpers take.
+ *
+ * It lives in `src/shared/habit-day.ts` — the one habit-day module both halves
+ * import — and is re-exported here so the host's own callers keep one place to
+ * look (docs/adr/0005-shared-habit-day.md).
+ */
+export type { DayBoundary }
 
 /** Vocabulary target used on the first habit day that ever exists. */
 export interface VocabTarget {
@@ -56,12 +66,6 @@ export const Config: Schema<Config> = Schema.object({
 /** The clock the plugin stamps with, from a validated config. */
 export function clockOf(config: Config): () => Date {
   return config.now ?? (() => new Date())
-}
-
-/** The part of the configuration that habit-day arithmetic needs. */
-export interface DayBoundary {
-  readonly dayStartHour: number
-  readonly timezone?: string
 }
 
 /** Project a validated config into the boundary the day-key helpers take. */

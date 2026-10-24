@@ -15,7 +15,7 @@
 import { z } from 'zod'
 import { assetRecord, counterRecord, dayRecord, mediaRecord, taskRecord } from './domain.ts'
 import type { HabitDomain } from './domain.ts'
-import type { DayKey } from './daykey.ts'
+import type { DayKey } from '../shared/habit-day.ts'
 
 /** Format marker: a file that does not carry it is not a backup of ours. */
 export const BACKUP_FORMAT = 'personal-track/backup'

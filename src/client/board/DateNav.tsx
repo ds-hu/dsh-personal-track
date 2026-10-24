@@ -6,7 +6,8 @@
  * habit day has nothing to record.
  */
 import { useState, type JSX } from 'react'
-import { dayLabelOf, shiftKey } from './format.ts'
+import { shiftDayKey } from '../../shared/habit-day.ts'
+import { dayLabelOf } from './format.ts'
 
 /** Props for the navigator. */
 export interface DateNavProps {
@@ -31,7 +32,7 @@ export function DateNav({ date, today, night, onChange }: DateNavProps): JSX.Ele
           className="pt-icon"
           title="前一天"
           aria-label="前一天"
-          onClick={() => onChange(shiftKey(date, -1))}
+          onClick={() => onChange(shiftDayKey(date, -1))}
         >‹</button>
         <div className="pt-nav-label">
           {dayLabelOf(date, isNight)}
@@ -43,7 +44,7 @@ export function DateNav({ date, today, night, onChange }: DateNavProps): JSX.Ele
           title="后一天"
           aria-label="后一天"
           disabled={atToday}
-          onClick={() => onChange(shiftKey(date, 1))}
+          onClick={() => onChange(shiftDayKey(date, 1))}
         >›</button>
         <button
           type="button"

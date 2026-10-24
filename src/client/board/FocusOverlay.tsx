@@ -40,6 +40,17 @@ export interface FocusOverlayProps {
   /** The entry as the panel last saw it; the overlay keeps its own copy after. */
   readonly entry: RegistryEntry
   /**
+   * The current habit day, from the panel's clock — the same value the board
+   * colours its deadlines with.
+   *
+   * The overlay must not derive one itself. A local calendar date disagrees
+   * with the habit day for the whole night tail, so the same task read 今天 in
+   * here and 3 天后 on the tile behind it (docs/adr/0005-shared-habit-day.md).
+   * Empty until the clock answers, which {@link dueLevelOf} reads as "no
+   * urgency".
+   */
+  readonly today: string
+  /**
    * Called once, with the entry as last written, when the mode is left.
    *
    * The caller is expected to *use* it: nothing else in the panel saw the writes
@@ -84,7 +95,7 @@ function ratioFromPointer(event: ReactPointerEvent<HTMLElement>, element: HTMLEl
 }
 
 /** Render one entry in focus mode. */
-export function FocusOverlay({ client, target, entry: initial, onClose }: FocusOverlayProps): JSX.Element {
+export function FocusOverlay({ client, target, entry: initial, today, onClose }: FocusOverlayProps): JSX.Element {
   const [entry, setEntry] = useState<RegistryEntry>(initial)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [notes, setNotes] = useState(initial.notes ?? '')
@@ -114,8 +125,6 @@ export function FocusOverlay({ client, target, entry: initial, onClose }: FocusO
   const isTask = target.kind === 'task'
   const task = isTask ? entry as TaskEntry : null
   const media = isTask ? null : entry as MediaEntry
-  /** The habit day the overlay is showing, for deadline urgency. */
-  const today = clockDate(nowMs)
 
   const report = useCallback((cause: unknown) => { setError(messageOf(cause)) }, [])
 
@@ -697,13 +706,6 @@ export function FocusOverlay({ client, target, entry: initial, onClose }: FocusO
       </div>
     </div>
   )
-}
-
-/** `HH:mm`-keyed date of an instant, for the "due today" comparison. */
-function clockDate(ms: number): string {
-  const at = new Date(ms)
-  const pad = (value: number): string => String(value).padStart(2, '0')
-  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`
 }
 
 /** `3 文本 · 2 图 · 1.4 MB`, or `空` for no materials at all. */

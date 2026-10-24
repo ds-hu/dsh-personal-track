@@ -6,33 +6,8 @@
  * would break "backfill recomputes immediately".
  */
 import type { DayRecord, TaskRecord } from './domain.ts'
-import { shiftDayKey, type DayKey } from './daykey.ts'
-
-/** The eight habit cells the board's completion bar is built from. */
-export type CellId =
-  | 'wash1' | 'wash2' | 'shower'
-  | 'breakfast' | 'lunch' | 'dinner'
-  | 'vocab' | 'duolingo'
-
-/** The fixed habit inventory: hard-coded in v1 by decision. */
-export const CELL_IDS: readonly CellId[] = [
-  'wash1', 'wash2', 'shower', 'breakfast', 'lunch', 'dinner', 'vocab', 'duolingo',
-]
-
-/** How many habit cells a day holds, before the tasks due that day are added. */
-export const CELL_TOTAL = CELL_IDS.length
-
-/** Display text per habit cell; the host owns it, so the client keeps no map. */
-const CELL_LABEL: Record<CellId, string> = {
-  wash1: '洗漱 1',
-  wash2: '洗漱 2',
-  shower: '洗澡',
-  breakfast: '早饭',
-  lunch: '午饭',
-  dinner: '晚饭',
-  vocab: '背单词',
-  duolingo: '多邻国',
-}
+import { HABITS, type CellId } from './habits.ts'
+import { shiftDayKey, type DayKey } from '../shared/habit-day.ts'
 
 /** One cell of the completion bar. */
 export interface Cell {
@@ -141,28 +116,48 @@ export function taskCellValue(task: DueTask): number {
 }
 
 /**
- * The day's completion bar: eight habit cells plus one cell per task due that
- * day, each carrying a fraction rather than a flag.
+ * One cell's fraction.
+ *
+ * The switch is exhaustive over {@link CellId}: a **格** added to the inventory
+ * without a value rule here is a compile error — the compiler help the three
+ * hand-kept inventories never had. `vocab` is the only cell that is genuinely
+ * fractional; a task's cell is fractional too, but tasks are not habits and are
+ * appended by the caller.
+ */
+function cellValue(id: CellId, day: DayRecord | undefined, vocab: VocabProgress | undefined): number {
+  switch (id) {
+    case 'wash1': return (day?.washes.times.length ?? 0) >= 1 ? 1 : 0
+    case 'wash2': return (day?.washes.times.length ?? 0) >= 2 ? 1 : 0
+    case 'shower': return day?.shower.at != null ? 1 : 0
+    case 'breakfast': return day?.meals.breakfast !== undefined ? 1 : 0
+    case 'lunch': return day?.meals.lunch !== undefined ? 1 : 0
+    case 'dinner': return day?.meals.dinner !== undefined ? 1 : 0
+    case 'vocab': return vocab?.ratio ?? 0
+    case 'duolingo': return duolingoMet(day) ? 1 : 0
+  }
+}
+
+/**
+ * The day's completion bar: the inventory's cells plus one cell per task due
+ * that day, each carrying a fraction rather than a flag.
  *
  * Most habits are all-or-nothing, but two are genuinely partial: vocabulary
  * reports its weighted target progress, and a task reports how far along it is.
  * A half-finished homework shows as a half-filled square, and the count reads
  * `4.5/9` — the bar answers "how much of today is done", not "how many boxes
  * are ticked".
+ *
+ * The cells come from `habits.ts`, so the bar and the statistics heat grid
+ * cannot disagree about which habits exist.
  */
 export function dayCells(day: DayRecord | undefined, dueTasks: readonly DueTask[] = []): Cell[] {
-  const washes = day?.washes.times.length ?? 0
-  const meals = day?.meals
-  const habit = (id: CellId, value: number): Cell => ({ id, label: CELL_LABEL[id], value })
+  const vocab = vocabProgress(day)
   return [
-    habit('wash1', washes >= 1 ? 1 : 0),
-    habit('wash2', washes >= 2 ? 1 : 0),
-    habit('shower', day?.shower.at != null ? 1 : 0),
-    habit('breakfast', meals?.breakfast !== undefined ? 1 : 0),
-    habit('lunch', meals?.lunch !== undefined ? 1 : 0),
-    habit('dinner', meals?.dinner !== undefined ? 1 : 0),
-    habit('vocab', vocabProgress(day)?.ratio ?? 0),
-    habit('duolingo', duolingoMet(day) ? 1 : 0),
+    ...HABITS.flatMap(habit => habit.cells.map(cell => ({
+      id: cell.id,
+      label: cell.label,
+      value: cellValue(cell.id, day, vocab),
+    }))),
     ...dueTasks.map(task => ({
       id: `task:${task.id}`,
       label: task.title,

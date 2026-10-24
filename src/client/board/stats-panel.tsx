@@ -10,7 +10,8 @@ import { useEffect, useMemo, useState, type JSX } from 'react'
 import type { HabitClient } from '../api.ts'
 import type { ClockView, RunPoint, StatsView } from '../types.ts'
 import { DataCard } from './data.tsx'
-import { mediaStatusLabel, messageOf, percentOf, shiftKey } from './format.ts'
+import { mediaStatusLabel, messageOf, percentOf } from './format.ts'
+import { shiftDayKey } from '../../shared/habit-day.ts'
 import { Pills, Tile, TileHead } from './tile.tsx'
 
 /** The preset ranges the panel offers. */
@@ -23,24 +24,13 @@ const RANGES: readonly { readonly value: RangeKey; readonly label: string }[] = 
   { value: 'd90', label: '近 90 天' },
 ]
 
-/** Display names for the seven habits. */
-const HABIT_LABELS: Record<string, string> = {
-  wash: '洗漱',
-  shower: '洗澡',
-  breakfast: '早饭',
-  lunch: '午饭',
-  dinner: '晚饭',
-  vocab: '背单词',
-  duolingo: '多邻国',
-}
-
 /** The range a preset names, inside the given habit day. */
 function presetRange(key: RangeKey, today: string): { from: string; to: string } {
   switch (key) {
-    case 'week': return { from: shiftKey(today, -6), to: today }
+    case 'week': return { from: shiftDayKey(today, -6), to: today }
     case 'month': return { from: `${today.slice(0, 8)}01`, to: today }
-    case 'd30': return { from: shiftKey(today, -29), to: today }
-    case 'd90': return { from: shiftKey(today, -89), to: today }
+    case 'd30': return { from: shiftDayKey(today, -29), to: today }
+    case 'd90': return { from: shiftDayKey(today, -89), to: today }
   }
 }
 
@@ -86,7 +76,7 @@ function HeatGrid({ stats }: { readonly stats: StatsView }): JSX.Element {
       <div className="pt-heat">
         {stats.habits.map(habit => (
           <div className="pt-heat-row" key={habit.id}>
-            <span className="pt-heat-label">{HABIT_LABELS[habit.id] ?? habit.id}</span>
+            <span className="pt-heat-label">{habit.label ?? habit.id}</span>
             <span className="pt-heat-cells">
               {habit.perDay.map((met, index) => (
                 <span
