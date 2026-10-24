@@ -15,11 +15,16 @@
  * (`apps/web/tests/fixtures/plugins/fixture-live-client/`).
  */
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
-/** Package name, also the browser module id. */
-const ID = 'personal-track'
+/**
+ * Browser module id: the manifest's package name, which is what
+ * `client-modules` keys the module graph by. Read from package.json rather
+ * than repeated here, so a rename cannot leave the bundle registered under the
+ * old id (the shell then simply never finds it).
+ */
+const ID = JSON.parse(readFileSync('package.json', 'utf8')).name
 
 /** Module specifiers the shell shares into its frozen module table. */
 const PLATFORM_MODULES = [

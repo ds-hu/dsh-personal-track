@@ -1,14 +1,16 @@
 {
-  "name": "personal-track",
-  "version": "0.2.0",
+  "name": "@ds-hu/personal-track",
+  "version": "0.3.0",
   "private": true,
   "license": "MIT",
   "type": "module",
-  "description": "DSH 个人习惯追踪插件：右侧栏每日看板 + 主面板统计",
+  "description": "DSH habit tracker: one main-area habit board with check-ins and statistics, plus a focus mode with notes and materials",
+  "icon": "./icon.svg",
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
+    "./locale/*.json": "./locale/*.json",
     "./package.json": "./package.json"
   },
   "dsh": {
@@ -22,7 +24,9 @@
   "files": [
     "lib/index.js",
     "lib/client.js",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "icon.svg",
+    "locale/*.json"
   ],
   "scripts": {
     "build": "node scripts/build.mjs",

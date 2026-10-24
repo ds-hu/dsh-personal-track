@@ -13,7 +13,14 @@ import { Config, boundaryOf, clockOf } from './config.ts'
 import { habitDomainSpec } from './domain.ts'
 import { createHabitStore } from './store.ts'
 
-/** Plugin display name (diagnostics); the patch row's `id` must equal this. */
+/**
+ * Plugin name (diagnostics, effect labels); the patch row's `id` equals this.
+ *
+ * Deliberately *not* the package name (`@ds-hu/personal-track`): the row id is
+ * the key a profile patch overrides and the name every effect label carries, so
+ * it stays the short one. What has to be the package name is the row's `name`
+ * (the module specifier the Loader resolves) and the browser module id.
+ */
 export const name = 'personal-track'
 
 /** Required services: both must be live before `apply` runs. */

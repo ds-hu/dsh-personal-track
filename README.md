@@ -1,5 +1,8 @@
 # personal-track
 
+包名 `@ds-hu/personal-track`。Plugins 面板里叫 **个人习惯追踪**（英文 Personal Track），
+图标是根目录的 `icon.svg`（完成度环，与看板顶部那个同源），标题与一句话说明来自 `locale/`。
+
 DeepSeek Harness（DSH）插件：**一个主面板「习惯看板」**，内含**打卡视图**（专注栏 + 当日看板）与**统计视图**，以及针对单个任务/影视书籍的**专注模式**（全屏 + 笔记 + 长图素材）。
 
 - 领域语言：[CONTEXT.md](./CONTEXT.md) —— 五形态（打卡/计数器/槽位/会话/登记）、习惯日与夜段、目标、格、任务进度、专注会话与素材
@@ -107,19 +110,19 @@ DeepSeek Harness（DSH）插件：**一个主面板「习惯看板」**，内含
 ```powershell
 # 方式 A —— 本机开发（推荐）：pnpm link 到 web profile，需要重启一次
 dsh plugin --profile web add link:D:/Projects/dsh-personal-track
-dsh --profile web --dump-config        # 应出现 "# == personal-track" 层
+dsh --profile web --dump-config        # 应出现 "# == @ds-hu/personal-track" 层
 # 然后重启：dsh --profile web
 
 # 方式 B —— 从 GitHub 装，不依赖本机路径：
-dsh plugin --profile web add github:cup113/personal-track
+dsh plugin --profile web add github:ds-hu/dsh-personal-track
 # 仓库里只有源码，lib/ 靠 package.json 的 prepare 在安装时现场构建；pnpm 11
 # 默认拦下依赖的构建脚本，首次安装会以 ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED
 # 失败，并把**精确键**（包名@解析后的 tarball URL）打印出来：
 #   allowBuilds:
-#     personal-track@https://codeload.github.com/cup113/personal-track/tar.gz/<sha>: true
+#     @ds-hu/personal-track@https://codeload.github.com/ds-hu/dsh-personal-track/tar.gz/<sha>: true
 # 把这一行原样抄进 profile 的 pnpm-workspace.yaml，再跑一次同样的 add 就装上了。
-# 裸包名（personal-track）不生效，personal-track@* 也会被拒（pnpm 只认精确
-# 版本）；键里带 commit sha，所以仓库每推一个新提交这个键就变，要重新批准一次
+# 裸包名（@ds-hu/personal-track）不生效，带 @* 也会被拒（pnpm 只认精确版本）；
+# 键里带 commit sha，所以仓库每推一个新提交这个键就变，要重新批准一次
 # —— 本机开发请走方式 A：link 不打包、不触发这道审批。
 ```
 
@@ -130,8 +133,27 @@ dsh plugin --profile web add github:cup113/personal-track
 dsh --profile web --patch D:/Projects/dsh-personal-track/dev.patch.yml
 ```
 
-patch 行的两条对齐铁律：`name` 必须是包名（Loader 据此从 profile 的 `node_modules` 解析代码），
-`id` 必须等于宿主半身导出的 `name`——本插件三条（包名 / `name` / `id`）都是 `personal-track`。
+patch 行的三条对齐铁律：
+
+| 字段 | 本插件的值 | 为什么是它 |
+|---|---|---|
+| `name` | `@ds-hu/personal-track`（包名） | Loader 据此从 profile 的 `node_modules` 解析代码；**必须等于包名**，否则这个 bundle 起不来 |
+| `id` | `personal-track` | 行自己的键：profile patch 用它写 `disabled` 覆盖，改它等于改所有既有覆盖 |
+| 宿主导出的 `name` | `personal-track` | 与 `id` 一致（诊断与 effect 标签用）；它**不是**包名 |
+
+浏览器模块 id 由 `scripts/build.mjs` 从 `package.json` 的 `name` 读出来，不手写第二份；
+`verify-client.mjs` 再对着 manifest 断言一次，所以改名不会漏掉其中一半。
+
+**从包名还是 `personal-track` 的版本升上来，要重装一次**：Loader 按 profile 里那条依赖的名字解析这一行，
+旧名字在新包里已经不存在，于是这一行（以及它的浏览器半身）起不来。两条命令即可：
+
+```powershell
+dsh plugin --profile web remove personal-track
+dsh plugin --profile web add link:D:/Projects/dsh-personal-track
+```
+
+数据与备份都不受影响：存储域在 `~/.dsh/storages/habit/`，备份格式仍是 `personal-track/backup`，
+行 `id` 与宿主导出的 `name` 也没变（写 `disabled` 覆盖的地方照旧）。
 
 ## 开发
 
@@ -225,6 +247,8 @@ tests/       support.ts（内存 Domain + 无端口 HTTP 驱动，按 schema 校
              client-format.test.ts · client-api.test.ts · editor-state.test.ts
              focus-panel.test.ts（专注退出后的交接、写队列与置顶撤下）
 docs/adr/    0001 树外传输 · 0002 状态派生不落库 · 0003 图片存域内 base64
+icon.svg     Plugins 面板的卡片 / 详情页 / 组件行图标（完成度环，与看板顶部那个同源）
+locale/      en.json · zh.json（`meta.title` 与 `meta.description`，Plugins 面板的标题与一句话说明）
 demo/        focus-mode.html（专注模式的零依赖单文件 demo，与实现同步；它读系统偏好、
              带全局 border-box，是因为它自己就扮演「外壳」，见文件顶部注释）
 ```
@@ -236,6 +260,14 @@ demo/        focus-mode.html（专注模式的零依赖单文件 demo，与实�
 - **测试用 Node 原生类型剥离**（`node tests/*.test.ts`）而不是 vitest：vite/vitest 内部经 esbuild JS API
   转换 TS，同样被沙箱挡住。
 - **`pnpm-workspace.yaml` 的 `allowBuilds: esbuild: false`**：我们直接调二进制，不需要它的 postinstall。
+- **Plugins 面板的图标与本地化标题全靠 manifest，而且要能经 ESM 解析器取到**：外壳不执行插件代码来画卡片，
+  它解析 `<包名>/package.json` 读 `icon`（manifest 相对路径、SVG/PNG/JPEG/WebP、≤256 KiB、必须留在包目录内），
+  再解析 `<包名>/locale/en.json` 拿到标题与说明，最后把图标内联成 data URI。三条容易被忽略的边界因此都
+  写在 `verify-client.mjs` 里：`./package.json` 与 `./locale/*.json` 必须留在 `exports` 里（否则
+  `ERR_PACKAGE_PATH_NOT_EXPORTED`，卡片只剩默认占位图），`icon.svg` 与 `locale/*.json` 必须写进 `files`
+  （否则 checkout 里好好的、装完就没了），`locale/` 里**每个** `.json` 的文件名都必须是语言 id
+  （`dictionariesOf` 扫整目录，一个 `zh_CN.json` 就让整目录失效）。标题按 `zh-CN → zh → en` 的兜底链取，
+  所以文件名写 `zh.json` 就够。
 - **`verify` 里不要嵌 `pnpm build`**：那会触发 pnpm 的依赖自检，无 TTY 时直接以
   `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` 中止。写成 `node scripts/build.mjs` 后，`pnpm verify`
   与 `npm run verify` 都能跑。

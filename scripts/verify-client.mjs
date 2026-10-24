@@ -8,11 +8,13 @@
  * injection — without a browser; React's actual mounting is the GUI's job.
  */
 import { strict as assert } from 'node:assert'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { extname, isAbsolute, resolve } from 'node:path'
 
 const require = createRequire(import.meta.url)
 const code = readFileSync('lib/client.js', 'utf8')
+const manifest = JSON.parse(readFileSync('package.json', 'utf8'))
 
 /** What the facade captured. */
 let loaded
@@ -40,7 +42,11 @@ globalThis.document = {
 new Function(code)()
 
 assert.ok(loaded, 'the bundle must call window.__ModuleLoader__.load')
-assert.equal(loaded.id, 'personal-track', 'browser module id must be the package name')
+// The graph is keyed by the manifest's package name — `client-modules` reads it
+// from package.json, not from the Loader row — so the id inside the bundle has
+// to be that same string. Compared against the manifest, never a literal: a
+// rename that updated one and not the other is exactly the failure this guards.
+assert.equal(loaded.id, manifest.name, 'browser module id must be the package name')
 assert.equal(typeof loaded.factory, 'function', 'the facade receives a factory')
 
 const exports_ = loaded.factory(require)
@@ -262,4 +268,93 @@ assert.match(
   'the client closes the focus session when the page is unloaded',
 )
 
+// --- the manifest the Plugins page reads -------------------------------------
+//
+// The shell draws a plugin's card, detail page and component rows from the
+// manifest alone, without evaluating plugin code: it resolves
+// `<package>/package.json` through the ESM resolver, then reads `icon` as a
+// manifest-relative SVG/PNG/JPEG/WebP of at most 256 KiB inside the manifest
+// directory and inlines it as a data URI. Every one of those is a way for the
+// picture to disappear while the file sits right there in the checkout, so the
+// pair is asserted here instead of being eyeballed in the GUI.
+const ICON_TYPES = new Map([
+  ['.svg', 'image/svg+xml'],
+  ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.webp', 'image/webp'],
+])
+
+// The manifest is only reachable through the export map: without it the shell's
+// resolver throws ERR_PACKAGE_PATH_NOT_EXPORTED and the plugin keeps the default
+// artwork.
+assert.equal(
+  manifest.exports['./package.json'],
+  './package.json',
+  'the shell resolves <package>/package.json, so the manifest must stay exported',
+)
+assert.equal(manifest.dsh.client.platform, 'web', 'the package declares its browser half')
+// The shell reads `exports["./client"]` (string form) and serves that file; this
+// file loads `lib/client.js` as the bundle. They are the same file or the
+// verified bundle is not the one the GUI runs.
+assert.equal(typeof manifest.exports['./client'], 'string', 'the browser half is exported as a plain string path')
+assert.equal(
+  resolve(manifest.exports['./client']),
+  resolve('lib/client.js'),
+  'the exported browser half is the bundle verified here',
+)
+
+const icon = manifest.icon
+assert.equal(typeof icon, 'string', 'the manifest declares the icon the Plugins page draws')
+assert.ok(
+  !isAbsolute(icon) && !/^[A-Za-z][A-Za-z\d+.-]*:/.test(icon),
+  `the icon is a manifest-relative path (${icon})`,
+)
+assert.ok(ICON_TYPES.has(extname(icon).toLowerCase()), `the icon is SVG, PNG, JPEG or WebP (${icon})`)
+
+const iconBytes = readFileSync(icon)
+assert.ok(iconBytes.length <= 256 * 1024, 'the icon is within the 256 KiB the shell admits')
+// An icon that is not in `files` resolves in a checkout and vanishes on install.
+assert.ok(
+  manifest.files.includes(icon.replace(/^\.\//, '')),
+  'the icon is listed in `files`, so an install carries it',
+)
+// The declared type comes from the extension alone, so the bytes have to match
+// it — a JSON or HTML file named `.svg` would be inlined as an unrenderable image.
+if (extname(icon).toLowerCase() === '.svg') {
+  assert.match(iconBytes.toString('utf8'), /^<svg[\s>]/, 'the icon really is an SVG document')
+}
+
+// The card's title and one-liner come from `locale/<language>.json`, and the
+// shell's reader is strict in two directions that a checkout cannot show:
+// it scans the *whole* locale directory once `en.json` resolves, and refuses the
+// entire directory if any file's name is not a language id or two names differ
+// only in case. Both make the card fall back to the package name, so the names
+// and the entries are asserted rather than assumed.
+const LANGUAGES = /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/u
+assert.equal(
+  manifest.exports['./locale/*.json'],
+  './locale/*.json',
+  'locale files resolve through the export map; without it the card has no local text',
+)
+assert.ok(manifest.files.includes('locale/*.json'), 'the locale files are listed in `files`')
+
+const localeFiles = readdirSync('locale').filter(name => name.endsWith('.json'))
+assert.ok(localeFiles.includes('en.json'), 'en.json is the file the shell resolves first')
+const languages = new Set()
+for (const name of localeFiles) {
+  const language = name.slice(0, -'.json'.length)
+  assert.match(language, LANGUAGES, `${name} is named for a language id`)
+  assert.ok(!languages.has(language.toLowerCase()), `${name} does not duplicate a language`)
+  languages.add(language.toLowerCase())
+  const meta = JSON.parse(readFileSync(resolve('locale', name), 'utf8')).meta
+  assert.equal(typeof meta?.title, 'string', `${name} declares meta.title`)
+  assert.equal(typeof meta?.description, 'string', `${name} declares meta.description`)
+  assert.ok(meta.title.trim() !== '' && meta.description.trim() !== '', `${name} carries non-empty text`)
+}
+
 console.log('client bundle ✓  wrapper, exports, panel registration, injection face and styles verified')
+console.log(
+  `plugin metadata ✓  ${manifest.name} — manifest reachable, icon ${icon} ships and is admissible,`
+  + ` ${localeFiles.length} locale file(s) present`,
+)

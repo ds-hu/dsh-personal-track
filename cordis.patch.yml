@@ -1,5 +1,10 @@
 # Loader rows this package contributes when installed as a bundle:
-#   dsh plugin --profile web add file:D:/Projects/dsh-personal-track
+#   dsh plugin --profile web add link:D:/Projects/dsh-personal-track
+#
+# `name` must be the bare package name: the Loader resolves it from the
+# profile's node_modules, and the nearest package.json supplies the browser
+# bundle id. `id` is the row's own key (what a profile patch overrides), so it
+# keeps the short name across the package rename.
 - insert:
     - id: personal-track
-      name: personal-track
+      name: '@ds-hu/personal-track'

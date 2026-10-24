@@ -1,5 +1,7 @@
 # personal-track（个人习惯追踪上下文）
 
+包名 `@ds-hu/personal-track`（v0.3.0 起；行 `id`、宿主导出的 `name` 与备份格式仍是 `personal-track`）。
+
 在 DSH Web GUI 里运行的个人习惯追踪插件：**一个主面板「习惯看板」**，内含**打卡视图**（当日的看板与专注栏）与**统计视图**（历史回顾），两者在面板内切换。
 
 ## Language
