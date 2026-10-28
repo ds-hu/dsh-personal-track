@@ -103,6 +103,30 @@ export function duolingoMet(day: DayRecord | undefined): boolean {
   return (day?.duolingo.length ?? 0) > 0
 }
 
+/**
+ * 健身's presence target: at least one training record on the day.
+ *
+ * A **presence** target, like duolingo's: one cell, full as soon as anything was
+ * trained. Not one cell per kind, because "did I train" is one question — a run
+ * plus a set of pull-ups is one trained day, not two halves of one. Every
+ * training kind counts: running, rope, pull-ups, plank, equipment, and free
+ * sessions. The two laundry/study families deliberately do not: washing clothes
+ * and studying are not training, and letting them fill this cell would make it a
+ * second "did I do anything" bar.
+ *
+ * A run is a single entry rather than an array, so its null check stands apart;
+ * free sessions are an array like the rest.
+ */
+export function sportMet(day: DayRecord | undefined): boolean {
+  if (day === undefined) return false
+  return day.run !== null
+    || day.rope.length > 0
+    || day.pullup.length > 0
+    || day.plank.length > 0
+    || day.equipment.length > 0
+    || day.free.length > 0
+}
+
 /** Round to one decimal, keeping integers whole. */
 function round1(value: number): number {
   return Math.round(value * 10) / 10
@@ -134,6 +158,7 @@ function cellValue(id: CellId, day: DayRecord | undefined, vocab: VocabProgress 
     case 'dinner': return day?.meals.dinner !== undefined ? 1 : 0
     case 'vocab': return vocab?.ratio ?? 0
     case 'duolingo': return duolingoMet(day) ? 1 : 0
+    case 'sport': return sportMet(day) ? 1 : 0
   }
 }
 

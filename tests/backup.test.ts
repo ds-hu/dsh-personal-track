@@ -23,7 +23,7 @@ const NEXT = '2026-09-17'
 /** Keys a stored habit day may carry. Anything else is a derived value leaked. */
 const DAY_FACT_KEYS = [
   'date', 'washes', 'shower', 'meals', 'vocab', 'duolingo', 'run',
-  'rope', 'pullup', 'plank', 'equipment', 'washing',
+  'rope', 'pullup', 'plank', 'equipment', 'free', 'washing',
 ]
 
 /** Fill one day with a bit of everything, so an export has something to carry. */
@@ -37,6 +37,7 @@ async function populate(api: Harness): Promise<void> {
   }))
   await api.store.addSession(DATE, 'vocab', { at: '2026-09-16T08:00:00', new: 10, review: 5, minutes: 30 })
   await api.store.addSession(DATE, 'duolingo', { at: '2026-09-16T09:00:00', minutes: 12 })
+  await api.store.addSession(DATE, 'free', { at: '2026-09-16T18:00:00', minutes: 45, kcal: 400 })
   await api.store.addSession(DATE, 'washing', { at: '2026-09-16T20:00:00', pieces: 3 })
   await api.store.setStock(2, '2026-09-16T20:00:00')
   await api.store.putTask({
@@ -58,6 +59,7 @@ await checkAsync('the bundle carries identity, a version and the five fact table
   )
   assert.equal(bundle.format, BACKUP_FORMAT)
   assert.equal(bundle.version, BACKUP_VERSION)
+  assert.equal(bundle.version, 3, 'free training is why the file layout moved to 3')
   assert.equal(bundle.exportedAt, '2026-09-16T21:00:00Z')
 })
 
@@ -146,6 +148,24 @@ check('an invalid field inside a well-formed envelope names that field', () => {
     days: [{ date: DATE, washes: { times: 'nope' } }], counters: {}, media: [], tasks: [],
   })
   assert.match(error.message, /days\.0/)
+})
+
+check('the older layouts still read, and an absent array means "none"', () => {
+  // Version 1 carried no assets; version 2 carried no free training. Both are
+  // readable, and the day they describe reads as a day with no free sessions and
+  // no images rather than as a broken file.
+  const v1 = readBackup({
+    format: BACKUP_FORMAT, version: 1, exportedAt: 'x',
+    days: [{ date: DATE }], counters: {}, media: [], tasks: [],
+  })
+  assert.deepEqual(v1.assets, [], 'version 1 files carry no images')
+  assert.deepEqual(v1.days[0]!.free, [], 'and no free training')
+
+  const v2 = readBackup({
+    format: BACKUP_FORMAT, version: 2, exportedAt: 'x',
+    days: [{ date: DATE, washes: { times: ['a'] } }], counters: {}, media: [], tasks: [], assets: [],
+  })
+  assert.deepEqual(v2.days[0]!.free, [], 'a version 2 day has no free sessions to read')
 })
 
 // --- all-or-nothing ----------------------------------------------------------

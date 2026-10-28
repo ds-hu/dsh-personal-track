@@ -25,18 +25,26 @@ export const BACKUP_FORMAT = 'personal-track/backup'
  *
  * Version 2 adds the `assets` array (version 1 files carry no images, and read
  * back as an empty asset set).
+ *
+ * Version 3 adds free-form training (`day.free`) and the 健身 **格** that reads
+ * it. The *domain* is still on version 2 and deliberately so: there a new
+ * optional-with-default field needs no bump, because an older build reading it
+ * merely drops the field. The file is different — an older build would read a
+ * version 2 file and silently strip every free session out of it, so the files
+ * are told apart by version and an unreadable one is refused with its own
+ * wording instead. Version 1 and 2 files still import: absent `free` means none.
  */
-export const BACKUP_VERSION = 2
+export const BACKUP_VERSION = 3
 
 /** Every file layout this build can read. */
-export const READABLE_BACKUP_VERSIONS: readonly number[] = [1, BACKUP_VERSION]
+export const READABLE_BACKUP_VERSIONS: readonly number[] = [1, 2, BACKUP_VERSION]
 
 const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/
 
 /** The file layout. Arrays, not maps: each record already carries its own key. */
 export const backupBundle = z.object({
   format: z.literal(BACKUP_FORMAT),
-  version: z.union([z.literal(1), z.literal(2)]),
+  version: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   /** When the file was written; informational, never applied on import. */
   exportedAt: z.string().min(1),
   days: z.array(dayRecord.extend({ date: z.string().regex(DATE_KEY, 'date must be YYYY-MM-DD') })),

@@ -189,6 +189,12 @@ const reportState: StateView = {
         { id: 'g4', at: '2026-09-20T11:15:00', name: '深蹲', reps: 12 },
       ],
       run: { at: '2026-09-20T18:00:00', minutes: 30, distanceKm: 5, avgHr: 156 },
+      free: [
+        { id: 'f1', at: '2026-09-20T19:00:00', minutes: 60, kcal: 500 },
+        // Unmeasured on purpose: the report must not read a missing reading as
+        // zero burn, nor pass its total off as the whole day's.
+        { id: 'f2', at: '2026-09-20T21:00:00', minutes: 20 },
+      ],
       washing: [],
     },
     target: { new: 20, review: 60 },
@@ -240,6 +246,10 @@ check('each group is one line, with the details it used to drop', () => {
     reportText.includes('器材 卧推 40kg 2 组 18 次 · 卧推 50kg 1 组 6 次 · 深蹲 1 组 12 次'),
     'the weight is kept, and only an identical load merges',
   )
+  assert.ok(
+    reportText.includes('自由 2 次（60+20 分 · 500 kcal，1/2 次有记录）'),
+    'every free session shows its own minutes, and a partial burn total says so',
+  )
 })
 check('tasks: every unfinished task is named, one Markdown list item each', () => {
   assert.ok(
@@ -285,12 +295,12 @@ check('an empty day still reports its zeros, and keeps every group line', () => 
         doneNew: 0, doneReview: 0, targetNew: 20, targetReview: 60,
         minutes: 0, ratio: 0, surplusNew: 0, surplusReview: 0, met: false,
       },
-      progress: { done: 0, total: 8 },
+      progress: { done: 0, total: 9 },
     },
     tasks: [],
   }
   const bare = dayReport(empty, reportClock)
-  assert.ok(bare.includes('完成 0/8（0%）'))
+  assert.ok(bare.includes('完成 0/9（0%）'))
   assert.ok(bare.includes('洗漱 0/2 · 洗澡 —'))
   assert.ok(bare.includes('三餐 早 — · 午 — · 晚 —'), 'the slots are named even when empty')
   assert.ok(bare.includes('健身 —'), 'a rest day keeps its line instead of vanishing')

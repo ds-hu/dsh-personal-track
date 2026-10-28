@@ -154,6 +154,7 @@ check('an empty day parses into an empty, well-formed record', () => {
   assert.deepEqual(empty.pullup, [])
   assert.deepEqual(empty.plank, [])
   assert.deepEqual(empty.equipment, [])
+  assert.deepEqual(empty.free, [])
   assert.deepEqual(empty.washing, [])
 })
 check('a task defaults to zero progress with no total', () => {
@@ -166,14 +167,14 @@ check('a task defaults to zero progress with no total', () => {
 console.log('cells (the completion bar)')
 check('an absent day completes nothing', () => {
   assert.equal(dayCells(undefined).length, CELL_TOTAL)
-  assert.deepEqual(cellProgress(undefined), { done: 0, total: 8 })
+  assert.deepEqual(cellProgress(undefined), { done: 0, total: 9 })
   assert.equal(isPerfectDay(undefined), false)
 })
 check('washes fill one cell per hit, capped at two', () => {
   assert.equal(cellProgress(day({ washes: { times: ['a'] } })).done, 1)
   assert.equal(cellProgress(day({ washes: { times: ['a', 'b'] } })).done, 2)
 })
-check('a perfect day completes all eight cells', () => {
+check('a perfect day completes all nine cells', () => {
   const perfect = day({
     washes: { times: ['a', 'b'] },
     shower: { at: '2026-09-16T07:00:00' },
@@ -184,10 +185,24 @@ check('a perfect day completes all eight cells', () => {
     },
     vocab: { target: { new: 10, review: 10 }, sessions: [{ id: 'v1', at: 'x', new: 10, review: 10, minutes: 30 }] },
     duolingo: [{ id: 'd1', at: 'x', minutes: 12 }],
+    free: [{ id: 'f1', at: 'x', minutes: 45, kcal: 400 }],
   })
-  assert.deepEqual(cellProgress(perfect), { done: 8, total: 8 })
+  assert.deepEqual(cellProgress(perfect), { done: 9, total: 9 })
   assert.equal(isPerfectDay(perfect), true)
-  assert.deepEqual(dayCells(perfect).map(cell => cell.value), Array(8).fill(1))
+  assert.deepEqual(dayCells(perfect).map(cell => cell.value), Array(9).fill(1))
+})
+check('a rest day loses the 健身 cell and is therefore not perfect', () => {
+  // The decision this encodes: training is part of the day's total, so a day
+  // with everything else done and nothing trained reads 8/9, not 100%.
+  const noTraining = day({
+    washes: { times: ['a', 'b'] },
+    shower: { at: 'x' },
+    meals: { breakfast: { at: 'x' }, lunch: { at: 'x' }, dinner: { at: 'x' } },
+    vocab: { target: { new: 1, review: 0 }, sessions: [{ id: 'v', at: 'x', new: 1, review: 0, minutes: 5 }] },
+    duolingo: [{ id: 'd', at: 'x', minutes: 5 }],
+  })
+  assert.deepEqual(cellProgress(noTraining), { done: 8, total: 9 })
+  assert.equal(isPerfectDay(noTraining), false)
 })
 check('a day with only a meal is not perfect', () => {
   assert.equal(isPerfectDay(day({ meals: { lunch: { at: 'x' } } })), false)
@@ -214,11 +229,11 @@ check('a task due that day is a cell, filled by its own progress', () => {
   const cells = dayCells(day(), tasks)
   assert.equal(cells.length, CELL_TOTAL + 3, 'the bar grows by one cell per due task')
   assert.equal(cells.at(-1)?.label, '预习', 'task cells carry the task title')
-  assert.equal(cells[8]?.id, 'task:t1')
-  assert.equal(cells[8]?.value, 0.5, '3 of 6 is half a cell')
-  assert.equal(cells[9]?.value, 1, 'a progress-less task is done or not')
-  assert.equal(cells[10]?.value, 0)
-  assert.deepEqual(cellProgress(day(), tasks), { done: 1.5, total: 11 })
+  assert.equal(cells[CELL_TOTAL]?.id, 'task:t1')
+  assert.equal(cells[CELL_TOTAL]?.value, 0.5, '3 of 6 is half a cell')
+  assert.equal(cells[CELL_TOTAL + 1]?.value, 1, 'a progress-less task is done or not')
+  assert.equal(cells[CELL_TOTAL + 2]?.value, 0)
+  assert.deepEqual(cellProgress(day(), tasks), { done: 1.5, total: 12 })
   assert.equal(isPerfectDay(day(), tasks), false, 'outstanding homework spoils the day')
 })
 check('the count keeps one decimal and never rounds a half away', () => {
@@ -230,7 +245,7 @@ check('the count keeps one decimal and never rounds a half away', () => {
     }),
     [{ id: 't1', title: '作业', current: 1, total: 3 }],
   )
-  assert.deepEqual(progress, { done: 1.8, total: 9 })
+  assert.deepEqual(progress, { done: 1.8, total: 10 })
 })
 
 console.log('vocabulary target progress')

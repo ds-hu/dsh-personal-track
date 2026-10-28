@@ -23,7 +23,7 @@ import type { ClockView, StateView, VocabProgress } from '../types.ts'
 import { CheckTile, LaundryTile, MealBoard } from './cards.tsx'
 import { Chip } from './Chip.tsx'
 import { DateNav } from './DateNav.tsx'
-import { EquipmentCard, PlankCard, PullupCard, RopeCard, RunTile } from './fitness.tsx'
+import { EquipmentCard, FreeCard, PlankCard, PullupCard, RopeCard, RunTile } from './fitness.tsx'
 import type { RegistryEntry } from './focus.ts'
 import { fractionText, messageOf } from './format.ts'
 import { MediaTile, TaskTile } from './registry.tsx'
@@ -362,6 +362,7 @@ export function BoardBody({
         <PullupCard sessions={record?.pullup ?? []} {...sessionHandlers('pullup')} />
         <PlankCard sessions={record?.plank ?? []} {...sessionHandlers('plank')} />
         <EquipmentCard sessions={record?.equipment ?? []} {...sessionHandlers('equipment')} />
+        <FreeCard sessions={record?.free ?? []} {...sessionHandlers('free')} />
 
         <GroupHeader label="记录" />
         <MediaTile

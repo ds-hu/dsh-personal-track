@@ -47,7 +47,7 @@ await checkAsync('an untouched day reads as an empty bar with the config default
   const day = state.day as Record<string, unknown>
   assert.equal(day.day, null, 'an untouched day has no document')
   assert.deepEqual(day.target, { new: 20, review: 60 })
-  assert.deepEqual(day.progress, { done: 0, total: 8 })
+  assert.deepEqual(day.progress, { done: 0, total: 9 })
   assert.equal(day.isToday, true, 'the pinned clock puts DATE on the same day')
   assert.deepEqual(state.stock, { pending: 0, updatedAt: new Date(0).toISOString() })
   assert.deepEqual(state.media, [])
@@ -187,19 +187,40 @@ await checkAsync('every session kind lands in its own array and moves the derive
   await api.state('POST', '/session', { date: DATE, kind: 'pullup', entry: { seconds: 30 } })
   await api.state('POST', '/session', { date: DATE, kind: 'plank', entry: { seconds: 60 } })
   await api.state('POST', '/session', { date: DATE, kind: 'equipment', entry: { name: '划船机', reps: 20, weight: 40 } })
+  await api.state('POST', '/session', { date: DATE, kind: 'free', entry: { minutes: 45, kcal: 380 } })
 
   const state = await api.state('GET', `/state?date=${DATE}`)
   const day = state.day as { day: Record<string, unknown>; vocab: { ratio: number; met: boolean } }
-  for (const field of ['vocab', 'duolingo', 'rope', 'pullup', 'plank', 'equipment']) {
+  for (const field of ['vocab', 'duolingo', 'rope', 'pullup', 'plank', 'equipment', 'free']) {
     assert.notEqual(day.day[field], undefined, `${field} should be recorded`)
   }
   assert.equal(day.vocab.ratio, 1, 'the vocab sessions satisfy the default target')
   assert.equal(day.vocab.met, true)
-  // The two habitual cells follow: vocabulary and duolingo.
+  // The habitual cells follow: vocabulary, duolingo, and the one 健身 cell every
+  // training record shares.
   const cells = (state.day as { cells: { id: string; value: number }[] }).cells
   assert.equal(cells.find(cell => cell.id === 'vocab')?.value, 1)
   assert.equal(cells.find(cell => cell.id === 'duolingo')?.value, 1)
-  assert.equal((state.day as { progress: { done: number } }).progress.done, 2, 'and nothing else was earned')
+  assert.equal(cells.find(cell => cell.id === 'sport')?.value, 1, 'any training fills 健身')
+  assert.equal((state.day as { progress: { done: number } }).progress.done, 3, 'and nothing else was earned')
+})
+
+await checkAsync('a free session needs a duration and may omit its energy', async () => {
+  const api = createHarness()
+  // No minutes: the session did not happen, so the schema refuses it rather than
+  // storing a zero-length workout.
+  const missing = await api.call('POST', '/session', { date: DATE, kind: 'free', entry: { kcal: 300 } })
+  assert.equal(missing.status, 400)
+  assert.match((missing.body as ErrorBody).error.message, /session free/)
+
+  const zero = await api.call('POST', '/session', { date: DATE, kind: 'free', entry: { minutes: 0 } })
+  assert.equal(zero.status, 400, 'a zero-minute session is not a session')
+
+  // The energy is a measurement, not something to invent: absent is fine.
+  const unmeasured = await api.state('POST', '/session', { date: DATE, kind: 'free', entry: { minutes: 30 } })
+  const sessions = (unmeasured.day as { day: { free: { minutes: number; kcal?: number }[] } }).day.free
+  assert.equal(sessions[0]!.minutes, 30)
+  assert.equal(sessions[0]!.kcal, undefined)
 })
 
 await checkAsync('a patch merges one session and keeps its id', async () => {

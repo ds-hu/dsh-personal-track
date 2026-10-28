@@ -44,7 +44,7 @@ import type { DayKey } from '../shared/habit-day.ts'
 export const LAUNDRY_KEY = 'laundry'
 
 /** Session-bearing habits (running is single-valued and handled apart). */
-export type SessionKind = 'vocab' | 'duolingo' | 'rope' | 'pullup' | 'plank' | 'equipment' | 'washing'
+export type SessionKind = 'vocab' | 'duolingo' | 'rope' | 'pullup' | 'plank' | 'equipment' | 'free' | 'washing'
 
 /** Everything the board needs about one habit day. */
 export interface DayView {
@@ -210,6 +210,7 @@ const SESSION_FIELD = {
   pullup: 'pullup',
   plank: 'plank',
   equipment: 'equipment',
+  free: 'free',
   washing: 'washing',
 } as const
 
@@ -354,6 +355,7 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
       case 'pullup': return day.pullup
       case 'plank': return day.plank
       case 'equipment': return day.equipment
+      case 'free': return day.free
       case 'washing': return day.washing
     }
   }

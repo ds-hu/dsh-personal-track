@@ -202,6 +202,13 @@ const sessionSchemas = {
     reps: z.number().int().nonnegative(),
     weight: z.number().nonnegative().optional(),
   }),
+  free: z.object({
+    at: ISO.optional(),
+    /** How long it went on; a free session with no duration is not a session. */
+    minutes: z.number().positive(),
+    /** Energy a device measured. Optional: the workout happened without one. */
+    kcal: z.number().nonnegative().optional(),
+  }),
   washing: z.object({ at: ISO.optional(), pieces: z.number().int().positive() }),
 } satisfies Record<SessionKind, z.ZodType>
 

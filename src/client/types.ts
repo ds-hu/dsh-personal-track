@@ -98,6 +98,20 @@ export type EquipmentSession = {
   readonly weight?: number
 }
 
+/**
+ * A free-form training session: a duration, plus the energy a device measured.
+ *
+ * The one training record with no fixed shape of its own, for work that is
+ * neither a run nor a set of anything. `kcal` is absent when no device said —
+ * an unmeasured workout still happened.
+ */
+export type FreeSession = {
+  readonly id: string
+  readonly at: string
+  readonly minutes: number
+  readonly kcal?: number
+}
+
 /** The stored document for one habit day, as the UI reads it. */
 export interface DayRecord {
   readonly date: string
@@ -117,6 +131,7 @@ export interface DayRecord {
   readonly pullup: readonly PullupSession[]
   readonly plank: readonly PlankSession[]
   readonly equipment: readonly EquipmentSession[]
+  readonly free: readonly FreeSession[]
   readonly run: {
     readonly at: string
     readonly minutes: number
@@ -393,6 +408,19 @@ export interface StatsView {
       readonly sets: number
       readonly reps: number
     }[]
+  }
+  /**
+   * Free-form training over the range.
+   *
+   * `kcal` sums only the sessions that carried a reading, and `kcalSessions`
+   * says how many those were — so "burned nothing" and "was not measured" stay
+   * distinguishable.
+   */
+  readonly free: {
+    readonly sessions: number
+    readonly minutes: number
+    readonly kcal: number
+    readonly kcalSessions: number
   }
   readonly washing: { readonly count: number; readonly pieces: number }
   readonly meals: {

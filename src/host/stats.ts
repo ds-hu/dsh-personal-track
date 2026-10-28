@@ -101,6 +101,22 @@ export interface StatsView {
     }[]
   }
   readonly washing: { readonly count: number; readonly pieces: number }
+  /**
+   * Free-form training: how many sessions, how long, and what the devices
+   * measured.
+   *
+   * `kcal` is the sum over the sessions that carried one, so a mixed range
+   * reports what is actually known rather than treating a missing reading as
+   * zero burn. `kcalSessions` says how many of `sessions` contributed, which is
+   * the difference between "burned nothing" and "was not measured" — the panel
+   * shows the count only when it is smaller than the session count.
+   */
+  readonly free: {
+    readonly sessions: number
+    readonly minutes: number
+    readonly kcal: number
+    readonly kcalSessions: number
+  }
   readonly meals: {
     /** Breakfast alone: the panel shows one meal slot, not three. */
     readonly breakfast: { readonly days: number; readonly ratio: number }
@@ -238,6 +254,10 @@ export function buildStats(
   let plankSets = 0
   let plankSeconds = 0
   const equipmentByLoad = new Map<string, { name: string; weight?: number; sets: number; reps: number }>()
+  let freeSessions = 0
+  let freeMinutes = 0
+  let freeKcal = 0
+  let freeKcalSessions = 0
   let washingCount = 0
   let washingPieces = 0
   for (const key of keys) {
@@ -279,6 +299,14 @@ export function buildStats(
     }
     washingCount += day.washing.length
     for (const wash of day.washing) washingPieces += wash.pieces
+    for (const session of day.free) {
+      freeSessions += 1
+      freeMinutes += session.minutes
+      if (session.kcal !== undefined) {
+        freeKcal += session.kcal
+        freeKcalSessions += 1
+      }
+    }
   }
 
   // --- meals
@@ -371,6 +399,12 @@ export function buildStats(
         .sort((a, b) => b.reps - a.reps),
     },
     washing: { count: washingCount, pieces: washingPieces },
+    free: {
+      sessions: freeSessions,
+      minutes: round1(freeMinutes),
+      kcal: Math.round(freeKcal),
+      kcalSessions: freeKcalSessions,
+    },
     meals: {
       breakfast: {
         days: slotStats.find(slot => slot.slot === 'breakfast')?.days ?? 0,

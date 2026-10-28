@@ -7,6 +7,7 @@
  * weight), so one form serves every habit kind instead of six near-copies.
  */
 import { useState, type JSX } from 'react'
+import { initialValuesOf } from './form-values.ts'
 
 /** One input in a compact form. */
 export interface FieldSpec {
@@ -78,16 +79,10 @@ export interface FieldFormProps {
 export function FieldForm({
   fields, initial, submitLabel, busy, onSubmit, onCancel, validate,
 }: FieldFormProps): JSX.Element {
-  const [values, setValues] = useState<Record<string, string>>(() => {
-    const start: Record<string, string> = {}
-    for (const field of fields) {
-      const existing = initial?.[field.name]
-      start[field.name] = existing === undefined || existing === null
-        ? field.defaultValue ?? ''
-        : String(existing)
-    }
-    return start
-  })
+  // `initial` fills a field being edited; the field's own `defaultValue` is what
+  // a new entry starts with. The rule lives in `form-values.ts` because "an empty
+  // string is not a value" is subtle enough to have been got wrong here.
+  const [values, setValues] = useState<Record<string, string>>(() => initialValuesOf(fields, initial))
   const [problem, setProblem] = useState<string | null>(null)
 
   const submit = (): void => {

@@ -13,6 +13,7 @@
 import { strict as assert } from 'node:assert'
 import { createChecker, fixedClock, memoryDomain, testConfig } from './support.ts'
 import { createHabitStore, type HabitStore } from '../src/host/store.ts'
+import { CELL_TOTAL } from '../src/host/habits.ts'
 
 const checker = createChecker('the habit store')
 const { check, checkAsync, report } = checker
@@ -34,7 +35,7 @@ check('an untouched day has no stored document and reads as empty', () => {
   const facts = store.dayFacts(DATE)
   assert.equal(facts.stored, null, 'and the caller is told the day is unbacked')
   assert.equal(facts.day.date, DATE)
-  assert.deepEqual(facts.progress, { done: 0, total: 8 })
+  assert.deepEqual(facts.progress, { done: 0, total: 9 })
   assert.equal(facts.perfect, false)
 })
 
@@ -113,6 +114,7 @@ await checkAsync('each session kind has its own array', async () => {
   await store.addSession(DATE, 'pullup', { at: 'x', seconds: 20 })
   await store.addSession(DATE, 'plank', { at: 'x', seconds: 45 })
   await store.addSession(DATE, 'equipment', { at: 'x', name: '划船机', reps: 10 })
+  await store.addSession(DATE, 'free', { at: 'x', minutes: 40, kcal: 300 })
   await store.addSession(DATE, 'washing', { at: 'x', pieces: 2 })
   const day = store.readDay(DATE)!
   assert.equal(day.duolingo.length, 1)
@@ -120,7 +122,26 @@ await checkAsync('each session kind has its own array', async () => {
   assert.equal(day.pullup.length, 1)
   assert.equal(day.plank.length, 1)
   assert.equal(day.equipment.length, 1)
+  assert.equal(day.free.length, 1)
+  assert.equal(day.free[0]!.minutes, 40)
+  assert.equal(day.free[0]!.kcal, 300)
   assert.equal(day.washing.length, 1)
+})
+
+await checkAsync('a free session keeps its duration when the energy is patched in later', async () => {
+  // The shape the board's own editor uses: an unmeasured workout first, the
+  // watch's number afterwards.
+  const { store } = storeAt()
+  const first = await store.addSession(DATE, 'free', { at: 'x', minutes: 30 })
+  const id = first.free[0]!.id
+  assert.equal(first.free[0]!.kcal, undefined, 'no reading, no field')
+  await store.patchSession(DATE, 'free', id, { kcal: 250 })
+  const after = store.readDay(DATE)!.free[0]!
+  assert.equal(after.id, id)
+  assert.equal(after.minutes, 30, 'the untouched field survives the patch')
+  assert.equal(after.kcal, 250)
+  await store.removeSession(DATE, 'free', id)
+  assert.equal(store.readDay(DATE)!.free.length, 0)
 })
 
 // --- the laundry pair --------------------------------------------------------
@@ -206,10 +227,10 @@ await checkAsync('a task due on a day is a cell on that day only', async () => {
   const { store } = storeAt()
   await store.putTask({ id: 't1', title: '今日作业', due: DATE, progress: { current: 1, total: 4 }, createdAt: 'c' } as never)
   const due = store.dayFacts(DATE)
-  assert.equal(due.progress.total, 9, 'the bar grows by one')
+  assert.equal(due.progress.total, CELL_TOTAL + 1, 'the bar grows by one')
   assert.equal(due.cells.at(-1)!.id, 'task:t1')
   assert.equal(due.cells.at(-1)!.value, 0.25)
-  assert.equal(store.dayFacts(NEXT).progress.total, 8, 'another day is untouched')
+  assert.equal(store.dayFacts(NEXT).progress.total, CELL_TOTAL, 'another day is untouched')
 })
 
 await checkAsync('the cell reads the task current state, not how it stood that day', async () => {
@@ -226,16 +247,16 @@ await checkAsync('due tasks on one day are ordered by title', async () => {
   // this is only about the cell order being stable, not about collation.
   await store.putTask({ id: 'b', title: 'beta', due: DATE, progress: { current: 0 }, createdAt: 'c' } as never)
   await store.putTask({ id: 'a', title: 'alpha', due: DATE, progress: { current: 0 }, createdAt: 'c' } as never)
-  const labels = store.dayFacts(DATE).cells.slice(8).map(cell => cell.label)
+  const labels = store.dayFacts(DATE).cells.slice(CELL_TOTAL).map(cell => cell.label)
   assert.deepEqual(labels, ['alpha', 'beta'])
 })
 
 await checkAsync('hard deleting a task takes its cell with it', async () => {
   const { store } = storeAt()
   await store.putTask({ id: 't1', title: '作业', due: DATE, progress: { current: 0 }, createdAt: 'c' } as never)
-  assert.equal(store.dayFacts(DATE).progress.total, 9)
+  assert.equal(store.dayFacts(DATE).progress.total, CELL_TOTAL + 1)
   assert.equal(await store.deleteTask('t1'), true)
-  assert.equal(store.dayFacts(DATE).progress.total, 8)
+  assert.equal(store.dayFacts(DATE).progress.total, CELL_TOTAL)
 })
 
 // --- task checkpoints --------------------------------------------------------

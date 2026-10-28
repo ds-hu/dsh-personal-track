@@ -30,7 +30,7 @@ await checkAsync('an empty range reports zeros rather than throwing', async () =
   assert.deepEqual(stats.days.map(day => day.stored), [false, false, false])
   assert.deepEqual(stats.days.map(day => day.done), [0, 0, 0])
   assert.equal(stats.perfectDays, 0)
-  assert.equal(stats.habits.length, 7, 'the seven habits are always reported')
+  assert.equal(stats.habits.length, 8, 'the eight habits are always reported')
   for (const habit of stats.habits) {
     assert.equal(habit.met, 0)
     assert.equal(habit.days, 3)
@@ -45,6 +45,7 @@ await checkAsync('an empty range reports zeros rather than throwing', async () =
   assert.deepEqual(stats.pullup, { sets: 0, seconds: 0 })
   assert.deepEqual(stats.plank, { sets: 0, seconds: 0 })
   assert.deepEqual(stats.equipment, { sets: 0, reps: 0, byName: [] })
+  assert.deepEqual(stats.free, { sessions: 0, minutes: 0, kcal: 0, kcalSessions: 0 })
   assert.deepEqual(stats.washing, { count: 0, pieces: 0 })
   assert.deepEqual(stats.meals, { breakfast: { days: 0, ratio: 0 }, spend: 0 })
   assert.equal(stats.media.finished, 0)
@@ -63,7 +64,7 @@ await checkAsync('an average is omitted rather than reported as zero when nothin
 
 await checkAsync('per-day completion, perfect days and stored flags', async () => {
   const api = createHarness()
-  // A perfect day needs all eight cells.
+  // A perfect day needs all nine cells, training included.
   await api.store.mutateDay(WED, day => ({
     ...day,
     washes: { times: ['a', 'b'] },
@@ -71,15 +72,35 @@ await checkAsync('per-day completion, perfect days and stored flags', async () =
     meals: { breakfast: { at: 'x' }, lunch: { at: 'x' }, dinner: { at: 'x' } },
     vocab: { target: { new: 1, review: 0 }, sessions: [{ id: 'v', at: 'x', new: 1, review: 0, minutes: 5 }] },
     duolingo: [{ id: 'd', at: 'x', minutes: 5 }],
+    rope: [{ id: 'r', at: 'x', preset: 90, seconds: 40 }],
   }))
   // A partly done day.
   await api.store.mutateDay(THU, day => ({ ...day, washes: { times: ['a'] } }))
 
   const stats = buildStats(api.store, WED, THU, boundaryOf(api.config))
   assert.deepEqual(stats.days.map(day => [day.date, day.stored]), [[WED, true], [THU, true]])
-  assert.deepEqual(stats.days.map(day => day.done), [8, 1])
-  assert.deepEqual(stats.days.map(day => day.total), [8, 8])
+  assert.deepEqual(stats.days.map(day => day.done), [9, 1])
+  assert.deepEqual(stats.days.map(day => day.total), [9, 9])
   assert.equal(stats.perfectDays, 1)
+})
+
+await checkAsync('training fills one 健身 cell and free sessions are aggregated apart', async () => {
+  const api = createHarness()
+  await api.store.addSession(WED, 'free', { at: 'x', minutes: 45, kcal: 400 })
+  // A second session, deliberately unmeasured: the burn sum must not treat a
+  // missing reading as zero burn.
+  await api.store.addSession(THU, 'free', { at: 'x', minutes: 30 })
+  await api.store.addSession(THU, 'plank', { at: 'x', seconds: 60 })
+
+  const stats = buildStats(api.store, WED, THU, boundaryOf(api.config))
+  const sport = stats.habits.find(habit => habit.id === 'sport')!
+  assert.equal(sport.label, '健身')
+  assert.deepEqual(sport.perDay, [true, true], 'a free session trains the day as a set does')
+  assert.equal(sport.met, 2)
+  assert.deepEqual(stats.free, { sessions: 2, minutes: 75, kcal: 400, kcalSessions: 1 })
+  // Two training records on Thursday are one trained day, so one cell: 健身
+  // answers "did I train", and a run plus a set is not two halves of a day.
+  assert.deepEqual(stats.days.map(day => day.done), [1, 1])
 })
 
 await checkAsync('vocabulary is summed and the surplus is reported separately', async () => {

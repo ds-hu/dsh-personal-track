@@ -1,10 +1,10 @@
 /**
  * The training tiles: running (single-valued, with derived pace), jump rope
- * (fixed-count sets), pull-ups (support time), plank (hold time) and gym
- * equipment.
+ * (fixed-count sets), pull-ups (support time), plank (hold time), gym
+ * equipment, and free-form sessions (a duration, plus optional energy).
  */
 import { useState, type JSX } from 'react'
-import type { EquipmentSession, PlankSession, PullupSession, RopeSession } from '../types.ts'
+import type { EquipmentSession, FreeSession, PlankSession, PullupSession, RopeSession } from '../types.ts'
 import { FieldForm, type FieldSpec } from './fields.tsx'
 import { paceLabel, paceOf, timeField, timeOf, timeValueOf } from './format.ts'
 import { SessionTile, type SessionEntry } from './session-cards.tsx'
@@ -51,6 +51,18 @@ const EQUIPMENT_FIELDS: readonly FieldSpec[] = [
   { name: 'weight', label: '重量(kg)', kind: 'number', step: 0.5, min: 0, optional: true },
 ]
 
+/**
+ * Fields for one free-form training session.
+ *
+ * The duration is required and the energy is not: a watch reports kcal, a person
+ * reports "an hour of badminton". Making the second field required would turn
+ * every unmeasured workout into a guess.
+ */
+const FREE_FIELDS: readonly FieldSpec[] = [
+  { name: 'minutes', label: '时长(分)', kind: 'number', min: 1 },
+  { name: 'kcal', label: '消耗(kcal)', kind: 'number', min: 0, optional: true },
+]
+
 /** The running entry the tile renders. */
 export interface RunEntry {
   readonly at: string
@@ -90,12 +102,22 @@ export function RunTile({ run, defaultMinutes, busy, onSet, onClear }: RunCardPr
       {editing ? (
         <FieldForm
           fields={fields}
-          initial={{
-            time: timeValueOf(run?.at),
-            minutes: run?.minutes,
-            distanceKm: run?.distanceKm,
-            avgHr: run?.avgHr,
-          }}
+          // Nothing to edit means nothing to pre-fill with: passing the day's
+          // absent run through would hand over `initial.time = ''` (and an
+          // undefined `minutes`), which wins over the field defaults and opens
+          // the form blank instead of at the current time. The fields' own
+          // defaults — the clock, and `defaultMinutes` — are what a new run
+          // starts from.
+          {...(run === null
+            ? {}
+            : {
+                initial: {
+                  time: timeValueOf(run.at),
+                  minutes: run.minutes,
+                  distanceKm: run.distanceKm,
+                  avgHr: run.avgHr,
+                },
+              })}
           submitLabel="保存"
           busy={busy}
           onSubmit={(payload) => {
@@ -187,6 +209,28 @@ export function EquipmentCard({ sessions, ...handlers }: SessionHandlers & { rea
       fields={EQUIPMENT_FIELDS}
       summarize={entry => `${String(entry.name)} · ${Number(entry.reps)} 次${entry.weight === undefined ? '' : ` · ${Number(entry.weight)}kg`} · ${timeOf(String(entry.at ?? ''))}`}
       addLabel="加一组"
+      emptyLabel="无记录"
+      {...handlers}
+    />
+  )
+}
+
+/**
+ * Free-form training: a duration, plus the energy a device measured.
+ *
+ * The sixth and last way to train, for work with no shape of its own — a swim, a
+ * class, a game. It is an ordinary session list, so it can be retimed and
+ * edited like every other one, and it fills the 健身 cell exactly as a set does.
+ */
+export function FreeCard({ sessions, ...handlers }: SessionHandlers & { readonly sessions: readonly FreeSession[] }): JSX.Element {
+  return (
+    <SessionTile
+      label="自由锻炼"
+      title="次数"
+      entries={sessions as readonly SessionEntry[]}
+      fields={FREE_FIELDS}
+      summarize={entry => `${Number(entry.minutes)} 分${entry.kcal === undefined ? '' : ` · ${Number(entry.kcal)} kcal`} · ${timeOf(String(entry.at ?? ''))}`}
+      addLabel="加一次"
       emptyLabel="无记录"
       {...handlers}
     />

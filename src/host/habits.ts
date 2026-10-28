@@ -1,7 +1,7 @@
 /**
  * The habit inventory: the one statement of which habits exist.
  *
- * Seven **习惯** own the eight **格** the completion bar is built from. Every
+ * Eight **习惯** own the nine **格** the completion bar is built from. Every
  * other statement of "which habits are there" derives from this module or is
  * asserted against it: the bar's cells (`derive.ts`), the statistics heat grid
  * and its streaks (`stats.ts`), the wire enums a check or a meal is addressed
@@ -35,12 +35,14 @@ export type CellId =
   | 'wash1' | 'wash2' | 'shower'
   | 'breakfast' | 'lunch' | 'dinner'
   | 'vocab' | 'duolingo'
+  | 'sport'
 
 /** One habit's identifier — what a **格** row and a heat-grid row are named by. */
 export type HabitId =
   | 'wash' | 'shower'
   | 'breakfast' | 'lunch' | 'dinner'
   | 'vocab' | 'duolingo'
+  | 'sport'
 
 /** One **格**: an id, and the label the bar shows for it. */
 export interface HabitCell {
@@ -66,8 +68,16 @@ export interface Habit {
  * The inventory, in the order the completion bar lists its cells.
  *
  * 洗漱 owns two cells and counts as one habit: that is why the heat grid has
- * seven rows while the bar has eight cells, and why the two can be joined by
+ * eight rows while the bar has nine cells, and why the two can be joined by
  * habit id.
+ *
+ * 健身 is one **presence** cell over six kinds of training (running, rope,
+ * pull-ups, plank, equipment, free). It is a cell of its own rather than one per
+ * kind because the question it answers — "did I train today" — is one question:
+ * a run and a set of pull-ups are two records of one trained day, not two
+ * halves of it. The rule that fills it lives in `derive.ts` (`sportMet`), where
+ * the training records are already in view; keeping its *existence* here is what
+ * makes the bar, the heat grid and 连续 agree about it.
  */
 export const HABITS: readonly Habit[] = [
   {
@@ -92,6 +102,7 @@ export const HABITS: readonly Habit[] = [
   { id: 'dinner', label: '晚饭', form: 'slot', cells: [{ id: 'dinner', label: '晚饭' }] },
   { id: 'vocab', label: '背单词', form: 'session', cells: [{ id: 'vocab', label: '背单词' }] },
   { id: 'duolingo', label: '多邻国', form: 'session', cells: [{ id: 'duolingo', label: '多邻国' }] },
+  { id: 'sport', label: '健身', form: 'session', cells: [{ id: 'sport', label: '健身' }] },
 ]
 
 /** Every **格**, flattened in bar order. */

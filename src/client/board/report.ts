@@ -20,7 +20,7 @@
  * board's own order. Finished tasks are not remaining, so the list does not
  * carry them.
  */
-import type { ClockView, EquipmentSession, Meal, StateView } from '../types.ts'
+import type { ClockView, EquipmentSession, FreeSession, Meal, StateView } from '../types.ts'
 import { dayLabelOf, fractionText, moneyOf, paceLabel, paceOf, percentOf } from './format.ts'
 import { byDeadline } from './task-order.ts'
 
@@ -117,6 +117,22 @@ function equipmentText(sets: readonly EquipmentSession[]): string {
     .join(' · ')
 }
 
+/** One free-form session's duration, in the same per-entry style as the others. */
+function freeText(sessions: readonly FreeSession[]): string {
+  const minutes = sessions.map(session => session.minutes).join('+')
+  const measured = sessions.filter(session => session.kcal !== undefined)
+  const kcal = measured.reduce((sum, session) => sum + (session.kcal ?? 0), 0)
+  // A total burn that leaves out unmeasured sessions has to say so, or the
+  // number reads as the whole day's. A comma rather than a second bracket: the
+  // segment is already inside the duration's parentheses.
+  const energy = measured.length === 0
+    ? ''
+    : measured.length === sessions.length
+      ? ` · ${kcal} kcal`
+      : ` · ${kcal} kcal，${measured.length}/${sessions.length} 次有记录`
+  return `自由 ${sessions.length} 次（${minutes} 分${energy}）`
+}
+
 /**
  * 健身: only the training that happened gets a segment — but the line itself
  * always appears, so a rest day reads as a rest day.
@@ -147,6 +163,9 @@ function fitnessLine(state: StateView): Line {
     }
     if (record.equipment.length > 0) {
       parts.push(`器材 ${equipmentText(record.equipment)}`)
+    }
+    if (record.free.length > 0) {
+      parts.push(freeText(record.free))
     }
   }
   return parts.length === 0 ? '健身 —' : parts.join(' · ')

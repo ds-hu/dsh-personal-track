@@ -96,6 +96,21 @@ export const dayRecord = z.object({
     reps: z.number().int().nonnegative(),
     weight: z.number().nonnegative().optional(),
   })).default([]),
+  /**
+   * Free-form training: a duration, and the energy it burned when a device knew
+   * it. The one training session with no fixed shape, for work that is neither
+   * a run nor a set of anything — a swim, a class, a game of ball.
+   *
+   * `kcal` is optional the way `run.avgHr` is: it is what a watch measured, not
+   * something the user can be asked to invent. A session without it still
+   * happened.
+   */
+  free: z.array(z.object({
+    id: sessionId,
+    at: z.string(),
+    minutes: z.number().positive(),
+    kcal: z.number().nonnegative().optional(),
+  })).default([]),
   /** Washing sessions: the history half of the laundry counter. */
   washing: z.array(z.object({
     id: sessionId,
@@ -265,6 +280,15 @@ export type AssetRecord = z.infer<typeof assetRecord>
  * `compatibleVersions: [1]` vouches for. Without it a `per-record` backend
  * *discards* every document stamped 1 (it never migrates), and a year of habit
  * days would disappear on the first restart after this change.
+ *
+ * The `free` session array did **not** bump this to 3, on purpose. A new
+ * optional-with-default field needs no version of its own: a document stamped 2
+ * still parses here, and a build from before it simply drops the field. Bumping
+ * would be the dangerous move — a per-record backend discards a document whose
+ * version it does not accept, so rolling back to the previous code would delete
+ * every day written by the newer one. The backup file carries the layout that
+ * does need a version (see `BACKUP_VERSION`), because there the alternative to a
+ * version is silently stripping a field.
  */
 export const habitDomainSpec = defineDomain({
   name: 'habit',

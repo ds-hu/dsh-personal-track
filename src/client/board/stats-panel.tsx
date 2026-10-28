@@ -278,6 +278,15 @@ export function StatsPanel({ client }: StatsPanelProps): JSX.Element {
                     `${entry.sets} 组 · ${entry.reps} 次`,
                   ] as const),
               ]} />
+              <MetricCard title="自由锻炼" rows={[
+                ['次数', `${stats.free.sessions}`],
+                ['总时长', `${stats.free.minutes} 分`],
+                // Only unmeasured sessions are the reason the two counts can
+                // differ, so the caveat appears exactly when it applies.
+                ...(stats.free.sessions === stats.free.kcalSessions
+                  ? [['消耗', stats.free.kcal === 0 ? '——' : `${stats.free.kcal} kcal`] as const]
+                  : [['消耗', `${stats.free.kcal} kcal（${stats.free.kcalSessions} 次有记录）`] as const]),
+              ]} />
               <MetricCard title="洗衣" rows={[
                 ['洗涤次数', `${stats.washing.count}`],
                 ['总件数', `${stats.washing.pieces}`],

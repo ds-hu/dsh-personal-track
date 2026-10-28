@@ -110,9 +110,9 @@ const empty = await api.call('GET', `/state?date=${DATE}`)
 assert.equal(empty.status, 200)
 assert.equal(empty.body.day.day, null, 'an untouched day has no document')
 assert.deepEqual(empty.body.day.target, { new: 20, review: 60 }, 'the config default is inherited')
-assert.deepEqual(empty.body.day.progress, { done: 0, total: 8 })
+assert.deepEqual(empty.body.day.progress, { done: 0, total: 9 })
 assert.equal(empty.body.stock.pending, 0)
-console.log('clock + untouched day ✓  (no document, config default target, 0/8)')
+console.log('clock + untouched day ✓  (no document, config default target, 0/9)')
 
 // --- vocabulary target snapshot ----------------------------------------------
 const targeted = await api.call('PUT', '/vocab-target', { date: DATE, new: 10, review: 5 })
@@ -220,6 +220,17 @@ const equipment = await api.call('POST', '/session', {
 })
 assert.equal(equipment.body.day.day.equipment[0].name, '划船机')
 
+// Free training: a duration, and the energy a device measured — or none at all.
+const free = await api.call('POST', '/session', { date: DATE, kind: 'free', entry: { minutes: 40, kcal: 320 } })
+assert.equal(free.body.day.day.free[0].minutes, 40)
+assert.equal(free.body.day.day.free[0].kcal, 320, 'the energy travels as a number')
+const unmeasured = await api.call('POST', '/session', { date: DATE, kind: 'free', entry: { minutes: 20 } })
+assert.equal(unmeasured.body.day.day.free[1].kcal, undefined, 'a session with no reading keeps no field')
+assert.equal(
+  unmeasured.body.day.cells.find(cell => cell.id === 'sport').value, 1,
+  'a free session fills 健身 like any other training',
+)
+
 const badKind = await api.call('POST', '/session', { date: DATE, kind: 'swimming', entry: {} })
 assert.equal(badKind.status, 400, 'an unknown session kind is refused')
 assert.equal(badKind.body.error.code, 'habit/bad-request')
@@ -281,29 +292,30 @@ assert.equal(dropped.body.media.length, 0)
 console.log('tasks + media ✓  (derived state, completion instant, null clears, hard delete)')
 
 // --- a task due today is a cell in today's bar --------------------------------
-// The day stands at 4 complete cells (one wash, a shower, lunch, duolingo); the
-// task adds a fifth denominator without moving the numerator yet.
+// The day stands at 5 complete cells (one wash, a shower, lunch, duolingo, and
+// 健身 from the training records above); the task adds a sixth denominator
+// without moving the numerator yet.
 const dated = await api.call('POST', '/tasks', { title: '今日作业', due: DATE })
 const datedId = dated.body.entry.id
 const withCell = (await api.call('GET', `/state?date=${DATE}`)).body
-assert.equal(withCell.day.progress.total, 9, 'a task due that day adds a cell to the bar')
+assert.equal(withCell.day.progress.total, 10, 'a task due that day adds a cell to the bar')
 assert.equal(withCell.day.cells.at(-1).id, `task:${datedId}`)
 assert.equal(withCell.day.cells.at(-1).label, '今日作业', 'the cell carries the task title')
 assert.equal(withCell.day.cells.at(-1).value, 0, 'and starts empty')
-assert.equal(withCell.day.progress.done, 4, 'an untouched task moves nothing yet')
+assert.equal(withCell.day.progress.done, 5, 'an untouched task moves nothing yet')
 
 await api.call('PATCH', '/tasks', { id: datedId, patch: { progress: { current: 1, total: 4 } } })
 const quarter = (await api.call('GET', `/state?date=${DATE}`)).body
 assert.equal(quarter.day.cells.at(-1).value, 0.25, 'progress fills the cell fractionally')
-assert.equal(quarter.day.progress.done, 4.3, 'a quarter of a cell reads as one decimal')
+assert.equal(quarter.day.progress.done, 5.3, 'a quarter of a cell reads as one decimal')
 // A different day is untouched by it, because only the deadline links them.
 const other = (await api.call('GET', '/state?date=2026-09-19')).body
-assert.equal(other.day.progress.total, 8, 'the cell belongs to the due date alone')
+assert.equal(other.day.progress.total, 9, 'the cell belongs to the due date alone')
 
 await api.call('DELETE', `/tasks?id=${datedId}`)
 const dropped2 = (await api.call('GET', `/state?date=${DATE}`)).body
-assert.equal(dropped2.day.progress.total, 8, 'deleting the task takes its cell back')
-assert.equal(dropped2.day.progress.done, 4)
+assert.equal(dropped2.day.progress.total, 9, 'deleting the task takes its cell back')
+assert.equal(dropped2.day.progress.done, 5)
 console.log('due-today cells ✓  (one cell per due task, fractional value, gone with the task)')
 
 // --- range statistics --------------------------------------------------------
@@ -312,13 +324,17 @@ console.log('due-today cells ✓  (one cell per due task, fractional value, gone
 // records: one request, the whole panel, one day of data.
 const dayStats = (await api.call('GET', `/stats?from=${DATE}&to=${DATE}`)).body
 assert.equal(dayStats.days.length, 1)
-assert.equal(dayStats.days[0].done, 4, 'one wash, shower, lunch, duolingo')
+assert.equal(dayStats.days[0].done, 5, 'one wash, shower, lunch, duolingo, and training')
 assert.equal(dayStats.days[0].stored, true)
 assert.equal(dayStats.vocab.daysMet, 0, 'the vocabulary session was deleted')
 assert.equal(dayStats.duolingo.lessons, 1)
 assert.equal(dayStats.rope.sets, 2)
 assert.equal(dayStats.pullup.sets, 1)
 assert.equal(dayStats.equipment.reps, 30)
+assert.deepEqual(
+  dayStats.free, { sessions: 2, minutes: 60, kcal: 320, kcalSessions: 1 },
+  'two sessions, one of them unmeasured — so the burn total is not the whole day\'s',
+)
 assert.equal(dayStats.washing.pieces, 3)
 assert.equal(dayStats.meals.spend, 12.5)
 assert.equal(dayStats.runs.count, 0, 'the running entry was cleared')
@@ -418,7 +434,7 @@ const legacy = await mount(LEGACY_ROOT)
 const legacyDay = await legacy.call('GET', `/state?date=${DATE}`)
 assert.equal(legacyDay.status, 200)
 assert.equal(legacyDay.body.day.day.washes.times.length, 1, 'a version 1 document is read, not discarded')
-assert.deepEqual(legacyDay.body.day.progress, { done: 1, total: 8 }, 'and every derived value is recomputed')
+assert.deepEqual(legacyDay.body.day.progress, { done: 1, total: 9 }, 'and every derived value is recomputed')
 assert.equal(legacyDay.body.tasks.length, 0, 'its records read as having no materials, not as broken')
 await legacy.stop()
 await rm(LEGACY_ROOT, { recursive: true, force: true })
@@ -476,7 +492,7 @@ await mkdir(BACKUP_ROOT, { recursive: true })
 const source = await mount()
 const backup = (await source.call('GET', '/backup')).body.backup
 assert.equal(backup.format, 'personal-track/backup')
-assert.equal(backup.version, 2)
+assert.equal(backup.version, 3)
 assert.equal(backup.days.length, 1, 'the saved day is in the backup')
 assert.equal(backup.days[0].date, DATE)
 assert.equal(backup.tasks.length, 2)
@@ -505,7 +521,7 @@ assert.equal(applied.body.report.removed, 0, 'an empty root had nothing to repla
 assert.equal(applied.body.stock.pending, 2, 'the imported stock is live')
 const restoredDay = (await restored.call('GET', `/state?date=${DATE}`)).body
 assert.equal(restoredDay.day.day.washes.times.length, 1)
-assert.equal(restoredDay.day.progress.done, 4, 'every cell is recomputed from the records')
+assert.equal(restoredDay.day.progress.done, 5, 'every cell is recomputed from the records')
 assert.equal(restoredDay.day.vocab.ratio, 0, 'progress is recomputed, not read from the file')
 assert.deepEqual(restoredDay.day.target, { new: 10, review: 5 }, 'the target snapshot survives')
 assert.equal(restoredDay.tasks.find(task => task.id === lateId)?.state, 'done', 'derived task state comes back')
