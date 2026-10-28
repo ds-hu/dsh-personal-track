@@ -206,14 +206,15 @@ pnpm verify       # 先构建，再跑客户端 facade + 宿主真实栈端到�
 统计视图的「导出」拿到一份 `personal-track-<日期>.json`：
 
 ```json
-{ "format": "personal-track/backup", "version": 2, "exportedAt": "…",
+{ "format": "personal-track/backup", "version": 3, "exportedAt": "…",
   "days": [ … ], "counters": { "laundry": { … } }, "media": [ … ], "tasks": [ … ],
   "assets": [ { "id": "…", "mime": "image/png", "data": "<base64>", "createdAt": "…" } ] }
 ```
 
 它**只含事实**：没有格数、比率、连续天数、逾期标记、专注时长、图片大小——这些导入后从记录重算，
 所以文件里不可能有与数据本身矛盾的字段（任务/媒体各自带 `id`，日文档自带 `date`，因此不需要外层键）。
-版本 1 的文件仍然可读（那时还没有图片），导入时按空图片集处理。
+版本 1 与 2 的文件仍可导入：v1 那时还没有图片，按空图片集处理；v2 没有「自由锻炼」，按这天没记处理。
+反向是拒绝的——旧构建读到版本 3 会整份拒绝，而不是把它不认识的字段静默剥掉。
 
 「选择备份…」只解析文件并显示条数，**此时还没有写入**；随后：
 
