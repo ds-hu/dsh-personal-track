@@ -2,58 +2,31 @@
  * Focus mode's shared, browser-free rules.
  *
  * What lives here is what both the column and the overlay need and neither
- * should own twice: how a pinned item is remembered, how a duration reads, and
- * how an entry is addressed. Keeping it free of React and of the DOM is also
+ * should own twice: how an entry is addressed, how a duration reads, and how a
+ * write's answer is adopted. Keeping it free of React and of the DOM is also
  * what makes it assertable in Node, next to the board's other pure modules.
+ *
+ * What is *not* here any more is the pinned item. The column used to remember
+ * one browser-local reference, with no instant attached — it answered "which
+ * entry did this browser open last", not "what did I focus on last". That is a
+ * derived fact now (`recentFocus` in `src/shared/focus-session.ts`), so the only
+ * focus state left in the panel is the in-memory target of an open overlay.
  */
-import type { FocusSession, MediaEntry, RegistryKind, StateView, TaskEntry } from '../types.ts'
+import type { MediaEntry, RegistryKind, StateView, TaskEntry } from '../types.ts'
 
 /** Either registry entry, as the focus surfaces handle them. */
 export type RegistryEntry = TaskEntry | MediaEntry
 
 /**
- * The item the focus column is showing.
+ * The entry focus mode is open on, right now.
  *
- * A reference, not a copy: the entry itself stays in the registry, so the
- * column always renders whatever the host last said about it.
+ * A reference, not a copy: the entry itself stays in the registry, so every
+ * surface always renders whatever the host last said about it. In memory only —
+ * it exists for as long as the overlay does.
  */
-export interface Pinned {
+export interface FocusTarget {
   readonly kind: RegistryKind
   readonly id: string
-}
-
-/** The slice of `localStorage` these rules need — so a test can pass a map. */
-export interface PinStorage {
-  getItem(key: string): string | null
-  setItem(key: string, value: string): void
-  removeItem(key: string): void
-}
-
-/** Where the pinned item is remembered. Presentation state, not domain data. */
-export const PINNED_KEY = 'personal-track/focus-pinned'
-
-/** Read the pinned item, ignoring anything malformed. */
-export function readPinned(storage: PinStorage): Pinned | null {
-  const raw = storage.getItem(PINNED_KEY)
-  if (raw === null) return null
-  try {
-    const parsed = JSON.parse(raw) as Partial<Pinned> | null
-    if (parsed === null || typeof parsed !== 'object') return null
-    if (parsed.kind !== 'task' && parsed.kind !== 'media') return null
-    if (typeof parsed.id !== 'string' || parsed.id === '') return null
-    return { kind: parsed.kind, id: parsed.id }
-  } catch {
-    return null
-  }
-}
-
-/** Remember the pinned item, or forget it with `null`. */
-export function writePinned(storage: PinStorage, pinned: Pinned | null): void {
-  if (pinned === null) {
-    storage.removeItem(PINNED_KEY)
-    return
-  }
-  storage.setItem(PINNED_KEY, JSON.stringify(pinned))
 }
 
 /** Which registry an entry came from — the entry itself carries the answer. */
@@ -61,28 +34,9 @@ export function kindOf(entry: RegistryEntry): RegistryKind {
   return 'state' in entry ? 'task' : 'media'
 }
 
-/** The pinned reference for an entry. */
-export function pinnedOf(entry: RegistryEntry): Pinned {
+/** The focus target for an entry. */
+export function targetOf(entry: RegistryEntry): FocusTarget {
   return { kind: kindOf(entry), id: entry.id }
-}
-
-/**
- * Whether the pinned entry no longer earns the column's card.
- *
- * A completed task stays in the registry — finishing is not deleting — but it
- * has nothing left for a "最近专注" card to offer, and the only way out of the
- * column used to be the user pressing ×. Media is deliberately left out: a
- * finished film is answered business too, but the ask was about tasks, and
- * keeping the rule to one derived state keeps it about **任务状态** rather than a
- * second opinion on media's three.
- */
-export function pinShouldRetire(entry: RegistryEntry): boolean {
-  return 'state' in entry && entry.state === 'done'
-}
-
-/** The session still running, if any. */
-export function openSession(sessions: readonly FocusSession[]): FocusSession | undefined {
-  return sessions.find(session => session.endedAt === undefined)
 }
 
 /**
@@ -147,4 +101,20 @@ export function clockLabel(at: Date): string {
 export function nowLabel(at: Date): string {
   const week = '日一二三四五六'[at.getDay()] ?? ''
   return `${clockLabel(at)} · 周${week}`
+}
+
+/**
+ * When a session happened, as `MM-DD HH:mm` in the reader's own zone.
+ *
+ * Deliberately not "今天": a session belongs to the **habit day** it started on,
+ * and the browser half does not know the host's configured `timezone` — reading
+ * one off the local calendar is exactly the class of bug
+ * docs/adr/0005-shared-habit-day.md records. A date plus a clock time is honest
+ * with what the browser knows; the duration beside it is zone-free anyway.
+ */
+export function sessionStamp(iso: string): string {
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return ''
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${clockLabel(at)}`
 }

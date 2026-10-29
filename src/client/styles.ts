@@ -441,9 +441,9 @@ const CSS = `
 /*
  * On a phone the column has nowhere to sit beside the board, so it only pushes
  * the board down. Focus mode is still one tap away — any row's title, or its ⤢
- * — and the pinned item stays pinned, so the column is dropped rather than
- * stacked. display:none takes it out of the flex row entirely, so the stack
- * closes up with no gap where it was.
+ * — and what the column shows is derived, so dropping it loses no state.
+ * display:none takes it out of the flex row entirely, so the stack closes up
+ * with no gap where it was.
  */
 @media (max-width: 720px) {
   .pt-focus-col { display: none; }

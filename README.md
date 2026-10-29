@@ -24,7 +24,7 @@ DeepSeek Harness（DSH）插件：**一个主面板「习惯看板」**，内含
 
 **素材 = 文本块（Markdown）+ 图片**，按加入顺序混排：`＋ 文本` 加一块 Markdown（标题/列表/引用/代码/行内样式，自己解析、零依赖、不经过 HTML 注入），`添加图片…`、直接 Ctrl+V 粘贴或拖入图片即可成为素材。长图默认整页适应，点一下切到原始尺寸（可滚动）；单张上限 10 MB。
 
-**专注栏**常驻打卡视图左侧：有置顶条目时显示它的卡片（累计专注、「继续专注」、取消置顶），没有时显示时钟、习惯日与当日完成摘要。置顶是展示态，记在浏览器本地，不进域、不进备份。**置顶的任务一旦完成就自动撤下**，专注栏回到时钟空态，不必手点 ×（完成不是删除，记录仍在看板里）；正在专注它的那一段除外，退出专注时才撤。窄屏（≤720px）下不显示这一栏——它没地方待在**看板**旁边，只会把看板往下推；专注模式改从看板任意条目进入，置顶照旧。
+**专注栏**常驻打卡视图左侧：有专注会话时显示**最近一段**所属条目的卡片（那一段的时刻与时长、累计专注、「继续专注」），一段都没有时显示时钟、习惯日与当日完成摘要。卡片是**派生**的——取全部任务/影视书籍里已闭合会话中开始最晚的那一段，不存、不记浏览器本地，所以刷新、换标签页、删掉条目之后它都与历史一致；也因此它没有 ×，换一张的办法是去专注别的条目。窄屏（≤720px）下不显示这一栏——它没地方待在**看板**旁边，只会把看板往下推；专注模式改从看板任意条目进入。
 
 
 两处**初值**是替你算好的：新增会话（背单词 / 多邻国 / 健身 / 自由锻炼 / 洗衣）的**时间默认当前时刻**
@@ -102,7 +102,7 @@ DeepSeek Harness（DSH）插件：**一个主面板「习惯看板」**，内含
 | 复制出的报告文本（含剩余任务的 Markdown 列表） | `src/client/board/report.ts` |
 | 统计视图的指标卡 | `src/client/board/stats-panel.tsx` |
 | 专注模式的版式与交互 | `src/client/board/FocusOverlay.tsx`（样式在 `src/client/styles.ts`） |
-| 专注栏的空态与置顶卡 | `src/client/board/FocusColumn.tsx` |
+| 专注栏的空态与最近一段卡 | `src/client/board/FocusColumn.tsx` |
 | 素材文本块的 Markdown 支持范围 | `src/client/board/markdown.ts` |
 | 单张图片上限（两半身共用） | `src/shared/route.ts` — `MAX_IMAGE_BYTES` |
 
@@ -229,18 +229,19 @@ pnpm verify       # 先构建，再跑客户端 facade + 宿主真实栈端到�
 ```
 src/shared/  route.ts（/habit/api 的唯一路由声明：两半身共用 method + path + 图片上限）
              habit-day.ts（习惯日算术：两半身共用一份，含夜段与到期带的量距）
+             focus-session.ts（专注会话：两半身共用一份——时长、未闭合、开合与「最近一段」）
 src/host/    index.ts（装配）· config.ts（含时间缝线 now）
              api.ts（传输：读 body、查表、映射失败形状，含唯一的二进制响应臂）
              routes.ts（每个路由一个 handler，返回响应体；素材与专注路由也在这里）
              api-error.ts（统一的失败词汇）· habits.ts（习惯清单：8 个习惯 / 9 个格）
-             domain.ts（zod + 域声明 + assets 表）· derive.ts（派生规则，含专注时长）
+             domain.ts（zod + 域声明 + assets 表）· derive.ts（派生规则：格、状态、配速、连续）
              store.ts（域访问；打卡上限与身份、素材增删、专注会话、级联与孤儿清扫）
              backup.ts（事实文件的读写与校验，v3 带自由锻炼、兼容 v1/v2）· stats.ts（范围聚合）
 src/client/  index.tsx（注册面：唯一主面板 + 侧栏入口）· api.ts（命令面，base/fetch 可注入）
              types.ts（线上契约）· styles.ts（注入式样式表，含专注模式与专注栏）
              board/（tile 原语 + 看板卡片 + 统计面板 + 数据卡片 + TrackPanel/FocusColumn/FocusOverlay）
              board/editor-state.ts（编辑器与导入状态机，纯函数）
-             board/focus.ts（专注的纯规则：置顶、交接、时长格式）· board/markdown.ts（迷你 Markdown 解析）
+             board/focus.ts（专注的纯规则：交接、时长与时刻格式）· board/markdown.ts（迷你 Markdown 解析）
              board/write-queue.ts（专注模式写入的串行队列：先落库，再退出）
              board/Markdown.tsx（把解析结果渲染成 React 节点，不经过 HTML 注入）
 scripts/     build.mjs（esbuild CLI 双产物）· run-tests.mjs（逐文件跑测试）
@@ -249,7 +250,8 @@ tests/       support.ts（内存 Domain + 无端口 HTTP 驱动，按 schema 校
              data-layer.test.ts（习惯日与派生值）· store.test.ts · stats.test.ts · backup.test.ts
              api-handle.test.ts · focus.test.ts（专注会话与素材）· markdown.test.ts
              client-format.test.ts · client-api.test.ts · editor-state.test.ts
-             focus-panel.test.ts（专注退出后的交接、写队列与置顶撤下）
+             shared-focus.test.ts（专注会话规则：时长、开合、最近一段）
+             focus-panel.test.ts（专注退出后的交接、写队列与最近一段的派生）
 docs/adr/    0001 树外传输 · 0002 状态派生不落库 · 0003 图片存域内 base64
 icon.svg     Plugins 面板的卡片 / 详情页 / 组件行图标（完成度环，与看板顶部那个同源）
 locale/      en.json · zh.json（`meta.title` 与 `meta.description`，Plugins 面板的标题与一句话说明）
@@ -313,7 +315,7 @@ demo/        focus-mode.html（专注模式的零依赖单文件 demo，与实�
   事件本身无法用本仓库的测试框架断言（没有 DOM 渲染），所以 `verify-client.mjs` 按**形状**守住产物里
   必然出现 `addEventListener("pagehide"` 这一条。
 - **退出专注后看板必须重读，而它读的不是今天**：面板与看板各持一份 `state` —— 面板读**今天**（专注栏与
-  置顶卡），看板读**正在看的那一天**（可能是历史日），所以合并成一个 slice 是错的，只能让看板按
+  最近一段卡），看板读**正在看的那一天**（可能是历史日），所以合并成一个 slice 是错的，只能让看板按
   `refreshToken` 重读它自己那一天。`onClose(entry)` 带回的条目要**真的用上**（`withEntry` 先本地采纳，
   卡片当场更新），再由宿主的重读确认。
   写入还必须**串行**（`board/write-queue.ts`）：拖动进度条连发几次**绝对值**的写，回包乱序时「最后一个

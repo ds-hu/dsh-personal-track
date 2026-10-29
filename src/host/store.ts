@@ -28,7 +28,6 @@ import { habitOf, type CheckHabit } from './habits.ts'
 import {
   cellProgress,
   dayCells,
-  focusSeconds,
   isOverdue,
   isPerfectDay,
   taskState,
@@ -38,6 +37,7 @@ import {
   type TaskState,
   type VocabProgress,
 } from './derive.ts'
+import { focusSeconds, withClosedSession, withOpenedSession } from '../shared/focus-session.ts'
 import type { DayKey } from '../shared/habit-day.ts'
 
 /** The laundry stock's key inside the counters table. */
@@ -751,30 +751,25 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
     readAsset: assetId => assets.get(assetId),
 
     startFocus: async (owner, id) => {
-      const startedAt = now().toISOString()
-      const sessionId = randomUUID()
+      // The one open session this entry may have is dropped, not closed at a
+      // guessed instant — see `withOpenedSession`.
+      const session = { id: randomUUID(), startedAt: now().toISOString() }
       await updateRegistry(owner, id, record => ({
         ...record,
-        // A session a crash left open has no honest end, so it is dropped
-        // rather than closed at a guessed instant.
-        focusSessions: [
-          ...record.focusSessions.filter(session => session.endedAt !== undefined),
-          { id: sessionId, startedAt },
-        ],
+        focusSessions: withOpenedSession(record.focusSessions, session),
       }))
       // The id travels back so the caller can close exactly this session
       // instead of inferring "the open one" from the list it is shown.
-      return sessionId
+      return session.id
     },
 
     endFocus: async (owner, id, sessionId) => {
       const endedAt = now().toISOString()
       await updateRegistry(owner, id, record => ({
         ...record,
-        // Closing an unknown or already-closed session is a no-op, not a fault:
-        // a second window may have finished it already.
-        focusSessions: record.focusSessions.map(session =>
-          session.id === sessionId && session.endedAt === undefined ? { ...session, endedAt } : session),
+        // An unknown or already-closed id is a no-op, not a fault: a second
+        // window may have finished it already.
+        focusSessions: withClosedSession(record.focusSessions, sessionId, endedAt),
       }))
     },
 

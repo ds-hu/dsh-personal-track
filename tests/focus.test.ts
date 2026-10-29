@@ -16,7 +16,7 @@
 import { strict as assert } from 'node:assert'
 import { createChecker, fixedClock, memoryDomain, testConfig } from './support.ts'
 import { createHabitStore, type HabitStore } from '../src/host/store.ts'
-import { focusSeconds } from '../src/host/derive.ts'
+import { focusSeconds } from '../src/shared/focus-session.ts'
 import type { HabitDomain } from '../src/host/domain.ts'
 
 const checker = createChecker('focus sessions and materials')

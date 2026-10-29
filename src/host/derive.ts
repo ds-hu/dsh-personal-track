@@ -223,30 +223,6 @@ export function isOverdue(task: TaskRecord, today: DayKey): boolean {
   return task.due < today
 }
 
-/**
- * Seconds spent focusing on one entry, summed over its sessions.
- *
- * Only **closed** sessions count. An open session has no end, and no instant
- * the *host* could pick for one — "now", or the moment of the last write — is
- * the moment the user actually stopped, so it is dropped instead (the next
- * `startFocus` clears it away) rather than closed at a guess. The one end the
- * client can honestly report is the page going away, and it does
- * (`pagehide` in `FocusOverlay`): a refresh is a real end. A crash fires no
- * such event, and that session is the one this rule drops. A backwards pair
- * counts zero rather than negative time.
- */
-export function focusSeconds(
-  sessions: readonly { readonly startedAt: string; readonly endedAt?: string }[],
-): number {
-  let total = 0
-  for (const session of sessions) {
-    if (session.endedAt === undefined) continue
-    const span = Date.parse(session.endedAt) - Date.parse(session.startedAt)
-    if (Number.isFinite(span) && span > 0) total += span / 1000
-  }
-  return Math.round(total)
-}
-
 /** Pace in minutes per kilometre; undefined when it cannot be computed. */
 export function paceMinPerKm(minutes: number, distanceKm: number): number | undefined {
   if (!(minutes > 0) || !(distanceKm > 0)) return undefined

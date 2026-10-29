@@ -96,8 +96,8 @@ export interface BoardBodyProps {
    * Told every time the board adopts a slice.
    *
    * The registry lists (`tasks`, `media`) are global, so the panel can take them
-   * from any read the board makes; that is how a card pinned in the focus column
-   * notices that its task was completed on the board.
+   * from any read the board makes; that is how the focus column's card notices
+   * that its entry changed on the board.
    */
   readonly onStateRead: (state: StateView) => void
 }

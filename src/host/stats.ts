@@ -7,7 +7,8 @@
  * per-day `dayFacts` are memoized, so a range costs one document read per day
  * no matter how many figures are derived from it.
  */
-import { focusSeconds, paceMinPerKm, streakFor } from './derive.ts'
+import { paceMinPerKm, streakFor } from './derive.ts'
+import { focusSeconds } from '../shared/focus-session.ts'
 import { HABITS, habitMet, type Habit, type HabitId } from './habits.ts'
 import { dayKeyRange, habitDayKey, type DayKey } from '../shared/habit-day.ts'
 import type { DayBoundary } from './config.ts'

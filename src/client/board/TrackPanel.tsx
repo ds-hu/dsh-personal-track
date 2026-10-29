@@ -3,25 +3,26 @@
  * the board view.
  *
  * The panel owns what both views and the focus surfaces need — the registry
- * snapshot, the clock, and which item is pinned or open — while the board keeps
- * owning its own shown day. Focus mode itself is an overlay rendered from here,
- * over whichever view is up.
+ * snapshot, the clock, and which entry focus mode is open on — while the board
+ * keeps owning its own shown day. Focus mode itself is an overlay rendered from
+ * here, over whichever view is up.
+ *
+ * The column's item is **derived**, not remembered: `recentFocus` reads the
+ * closed sessions every entry already carries, so the card is the same in every
+ * tab and survives a reload without any browser-local state.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react'
 import type { HabitClient } from '../api.ts'
+import { recentFocus } from '../../shared/focus-session.ts'
 import type { ClockView, StateView } from '../types.ts'
 import { BoardBody } from './BoardBody.tsx'
 import { FocusColumn } from './FocusColumn.tsx'
 import { FocusOverlay } from './FocusOverlay.tsx'
 import {
   kindOf,
-  pinnedOf,
-  pinShouldRetire,
-  readPinned,
+  targetOf,
   withEntry,
-  writePinned,
-  type PinStorage,
-  type Pinned,
+  type FocusTarget,
   type RegistryEntry,
 } from './focus.ts'
 import { messageOf } from './format.ts'
@@ -36,28 +37,6 @@ const VIEWS: readonly { readonly value: ViewKey; readonly label: string }[] = [
   { value: 'stats', label: '统计' },
 ]
 
-/**
- * `localStorage`, or a memory stand-in when the browser refuses it.
- *
- * A private-mode browser throws on access; the pinned item is presentation
- * state, so losing it is not worth an error path in the UI.
- */
-function pinStorage(): PinStorage {
-  try {
-    const probe = 'personal-track/probe'
-    window.localStorage.setItem(probe, '1')
-    window.localStorage.removeItem(probe)
-    return window.localStorage
-  } catch {
-    const map = new Map<string, string>()
-    return {
-      getItem: key => map.get(key) ?? null,
-      setItem: (key, value) => { map.set(key, value) },
-      removeItem: (key) => { map.delete(key) },
-    }
-  }
-}
-
 /** Props handed in by the slot registration's injection face. */
 export interface TrackPanelProps {
   readonly client: HabitClient
@@ -69,11 +48,9 @@ export function TrackPanel({ client }: TrackPanelProps): JSX.Element {
   const [snapshot, setSnapshot] = useState<StateView | null>(null)
   const [clock, setClock] = useState<ClockView | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [pinned, setPinned] = useState<Pinned | null>(() => readPinned(pinStorage()))
-  const [focused, setFocused] = useState<Pinned | null>(null)
+  const [focused, setFocused] = useState<FocusTarget | null>(null)
   /** Bumped when focus mode closes, so the board re-reads the day it shows. */
   const [boardToken, setBoardToken] = useState(0)
-  const storage = useRef<PinStorage>(pinStorage())
   /** Reads issued so far, so an older answer cannot overwrite a newer one. */
   const reads = useRef(0)
 
@@ -108,23 +85,24 @@ export function TrackPanel({ client }: TrackPanelProps): JSX.Element {
     [snapshot],
   )
 
+  /**
+   * What the column's card is: the entry whose closed session started last.
+   *
+   * Derived from the same lists the board already reads, so the card needs no
+   * request of its own and no browser-local memory — a reload, another tab or a
+   * deleted entry all answer through this one line.
+   */
+  const recent = useMemo(() => recentFocus(entries), [entries])
+
   const entryFor = useCallback(
-    (target: Pinned | null): RegistryEntry | undefined =>
+    (target: FocusTarget | null): RegistryEntry | undefined =>
       target === null ? undefined : entries.find(entry => kindOf(entry) === target.kind && entry.id === target.id),
     [entries],
   )
 
-  /** Enter focus mode on one entry, pinning it as the column's item. */
+  /** Enter focus mode on one entry. Nothing is remembered but the target. */
   const openFocus = useCallback((entry: RegistryEntry): void => {
-    const target = pinnedOf(entry)
-    setPinned(target)
-    writePinned(storage.current, target)
-    setFocused(target)
-  }, [])
-
-  const unpin = useCallback((): void => {
-    setPinned(null)
-    writePinned(storage.current, null)
+    setFocused(targetOf(entry))
   }, [])
 
   /**
@@ -149,9 +127,8 @@ export function TrackPanel({ client }: TrackPanelProps): JSX.Element {
    *
    * `tasks` and `media` are registry-wide — a task or a film belongs to no habit
    * day — so the board's read of whatever day it is showing carries the same
-   * lists the column needs. That is how a card pinned in the column notices a
-   * task completed on the board, instead of waiting for the window to lose and
-   * regain focus.
+   * lists the column needs. That is how the column notices a task completed on
+   * the board, instead of waiting for the window to lose and regain focus.
    */
   const mergeRegistry = useCallback((next: StateView): void => {
     setSnapshot(previous => (
@@ -159,22 +136,6 @@ export function TrackPanel({ client }: TrackPanelProps): JSX.Element {
     ))
   }, [])
 
-  // A pinned item the registry no longer holds (deleted elsewhere) is dropped
-  // rather than drawn as a card with nothing behind it — and so is one whose
-  // task is finished: a done task has nothing left for a "最近专注" card, and the
-  // only way out of the column used to be the user pressing ×.
-  useEffect(() => {
-    if (pinned === null || snapshot === null) return
-    // Not while its own overlay is open: the user may be about to clear that
-    // "done" right there (标记未完成), and the pin would then be gone for good.
-    if (focused !== null && focused.kind === pinned.kind && focused.id === pinned.id) return
-    const entry = entryFor(pinned)
-    if (entry !== undefined && !pinShouldRetire(entry)) return
-    setPinned(null)
-    writePinned(storage.current, null)
-  }, [entryFor, focused, pinned, snapshot])
-
-  const pinnedEntry = entryFor(pinned)
   const focusedEntry = entryFor(focused)
   const overdue = snapshot === null ? 0 : snapshot.tasks.filter(task => task.overdue).length
   const remaining = snapshot === null ? 0 : snapshot.tasks.filter(task => task.state !== 'done').length
@@ -191,14 +152,13 @@ export function TrackPanel({ client }: TrackPanelProps): JSX.Element {
       {view === 'board' ? (
         <div className="pt-track-body">
           <FocusColumn
-            entry={pinnedEntry}
+            recent={recent}
             today={clock?.today ?? ''}
             night={clock?.nightTail ?? false}
             progress={snapshot?.day.progress}
             remaining={remaining}
             overdue={overdue}
-            onUnpin={unpin}
-            onContinue={() => { if (pinnedEntry !== undefined) setFocused(pinnedOf(pinnedEntry)) }}
+            onContinue={() => { if (recent !== undefined) setFocused(targetOf(recent.entry)) }}
           />
           <BoardBody
             client={client}

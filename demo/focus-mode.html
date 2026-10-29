@@ -104,8 +104,8 @@
     background: var(--pt-surface);
   }
   @media (max-width: 800px) { .focus-col { width: auto; position: static; } }
-  /* 手机宽度下这一栏没地方待，只会把看板往下推：专注模式从任意条目进入，置顶
-     也照旧保留，所以宁可不显示，而不是叠在看板上方占一行高。 */
+  /* 手机宽度下这一栏没地方待，只会把看板往下推：专注模式从任意条目进入，卡片
+     又是派生物，藏起来不丢任何状态，所以宁可不显示，而不是叠在看板上方占一行高。 */
   @media (max-width: 720px) { .focus-col { display: none; } }
   .focus-label { font-size: 11px; letter-spacing: .07em; opacity: .55; }
   .focus-clock { font-size: 34px; font-weight: 250; line-height: 1.05; font-variant-numeric: tabular-nums; }
@@ -465,7 +465,7 @@
 <script>
 'use strict'
 /* ======================================================================
- * 假数据与持久化（localStorage 模拟宿主：笔记 / Markdown 素材 / 专注会话 / 置顶）
+ * 假数据与持久化（localStorage 模拟宿主：笔记 / Markdown 素材 / 专注会话）
  * ==================================================================== */
 const pad = n => String(n).padStart(2, '0')
 const todayText = () => {
@@ -754,14 +754,30 @@ function stripHTML() {
     </div>`
 }
 
-/* 专注栏：置顶卡片或空态（时钟 + 摘要） */
-let pinned = store.get('pinned', null)
+/* 专注栏：最近一段已闭合会话所属的条目，或空态（时钟 + 摘要）。
+ * 卡片是派生物，和实现同一条规则：遍历全部条目，取已闭合会话里开始最晚的一段。 */
+function recentFocus() {
+  let best = null
+  for (const id of Object.keys(ENTRIES)) {
+    for (const x of store.get('sessions:' + id, [])) {
+      if (!(x.e > 0)) continue
+      if (best === null || x.s > best.s) best = { id, s: x.s, e: x.e }
+    }
+  }
+  return best
+}
+/* 会话发生在何时：MM-DD HH:mm（本机时区）。刻意不说「今天」——习惯日不由本地日历决定。 */
+function stampText(ms) {
+  const d = new Date(ms)
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
 function renderFocusCol() {
   const col = document.getElementById('focus-col')
   if (!col) return
-  if (pinned && ENTRIES[pinned]) {
-    const e = ENTRIES[pinned]
-    const cumul = cumulativeOf(pinned)
+  const recent = recentFocus()
+  const e = recent === null ? null : ENTRIES[recent.id]
+  if (recent !== null && e) {
+    const cumul = cumulativeOf(recent.id)
     const sub = e.kind === 'task'
       ? (e.total ? `进度 ${e.current}/${e.total}` : '勾选型') + (e.due ? ` · 截止于${dueText(e.due)}` : '')
       : (e.sub === 'film' ? '影' : '书') + ' · ' + ({ active: '在看/在读', done: '完成', dropped: '弃' }[e.status])
@@ -770,15 +786,14 @@ function renderFocusCol() {
       <div class="focus-card">
         <div class="focus-card-head">
           <span class="focus-card-title">${esc(e.title)}</span>
-          <button class="pt-icon" title="取消置顶" id="unpin">×</button>
         </div>
         <span class="focus-card-sub">${esc(sub)}</span>
+        <span class="focus-card-sub">最近一段 ${stampText(recent.s)} · ${mmss(recent.e - recent.s)}</span>
         <span class="focus-time" id="focus-cumul">累计专注 ${mmss(cumul)}</span>
         <div class="focus-card-actions">
-          <button class="pt-primary" data-focus-open="${pinned}">继续专注</button>
+          <button class="pt-primary" data-focus-open="${recent.id}">继续专注</button>
         </div>
       </div>`
-    col.querySelector('#unpin').onclick = () => { pinned = null; store.set('pinned', null); renderFocusCol() }
   } else {
     col.innerHTML = `
       <span class="focus-label">专注栏</span>
@@ -905,8 +920,6 @@ function openFocus(id) {
   focus.mdTimers = {}
   /* materials = Array<Markdown | Image>；Markdown 块持久在 localStorage，图片 demo 内存态。 */
   focus.materials = store.get('mds:' + id, []).map(text => ({ kind: 'md', text, editing: false }))
-  pinned = id
-  store.set('pinned', id)
 
   /* 专注会话：开始（未闭合的旧会话——比如上次关页——直接丢弃，时长未知即非事实） */
   const sessions = store.get('sessions:' + id, []).filter(x => x.e > 0)

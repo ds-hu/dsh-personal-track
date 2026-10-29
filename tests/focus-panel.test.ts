@@ -1,6 +1,6 @@
 /**
- * What the panel does with what focus mode hands back, and what the column does
- * with a pinned entry whose task is done.
+ * What the panel does with what focus mode hands back, and what the focus
+ * column's card is derived from.
  *
  * Both defects these guard live in a component's wiring, which this repo cannot
  * render in Node — so the load-bearing parts were pulled out into pure rules and
@@ -12,16 +12,19 @@
  * - leaving the mode waits for them (`settled`), so the board's re-read cannot
  *   race the last write;
  * - the entry handed back is adopted into the panel's slice instead of dropped;
- * - a pinned **task** that is done stops occupying the column, while media keeps
- *   its pin.
+ * - the card is the newest **closed** session across both registries, i.e. a
+ *   derived fact rather than a browser-local pin. A completed task keeps its
+ *   session: finishing is not deleting, and the card reports what happened
+ *   instead of curating what should stay on screen.
  *
  * Runs on Node's native type stripping:
  *   node tests/focus-panel.test.ts
  */
 import { strict as assert } from 'node:assert'
-import { pinShouldRetire, withEntry } from '../src/client/board/focus.ts'
+import { recentFocus } from '../src/shared/focus-session.ts'
+import { withEntry } from '../src/client/board/focus.ts'
 import { createWriteQueue } from '../src/client/board/write-queue.ts'
-import type { MediaEntry, StateView, TaskEntry } from '../src/client/types.ts'
+import type { FocusSession, MediaEntry, StateView, TaskEntry } from '../src/client/types.ts'
 
 let passed = 0
 
@@ -46,6 +49,35 @@ function taskOf(entry: Omit<TaskEntry, 'materials' | 'focusSessions' | 'focusSec
 /** One media entry as the state slice carries it. */
 function mediaOf(entry: Omit<MediaEntry, 'materials' | 'focusSessions' | 'focusSeconds'>): MediaEntry {
   return { materials: [], focusSessions: [], focusSeconds: 0, ...entry }
+}
+
+/** One closed focus session. */
+function closed(id: string, startedAt: string, endedAt: string): FocusSession {
+  return { id, startedAt, endedAt }
+}
+
+/** A task entry carrying these focus sessions. */
+function taskFocusing(id: string, state: TaskEntry['state'], sessions: readonly FocusSession[]): TaskEntry {
+  return {
+    ...taskOf({
+      id,
+      title: id,
+      progress: { current: 0 },
+      checkpoints: [],
+      createdAt: '2026-09-18T10:00:00',
+      state,
+      overdue: false,
+    }),
+    focusSessions: sessions,
+  }
+}
+
+/** A media entry carrying these focus sessions. */
+function mediaFocusing(id: string, sessions: readonly FocusSession[]): MediaEntry {
+  return {
+    ...mediaOf({ id, kind: 'film', title: id, status: 'active', createdAt: '2026-09-10T10:00:00' }),
+    focusSessions: sessions,
+  }
 }
 
 /** A minimal slice: the two registries, plus a day the entry rules must not touch. */
@@ -202,34 +234,30 @@ await check('an entry the slice does not hold leaves it exactly as it was', () =
   assert.equal(withEntry(SLICE, stranger), SLICE, 'the same slice back, not an empty rebuild')
 })
 
-console.log('when the column lets a pinned entry go')
-await check('a completed task retires, a live one does not', () => {
-  assert.equal(pinShouldRetire(SLICE.tasks[0] as TaskEntry), false, 'doing')
-  assert.equal(pinShouldRetire(SLICE.tasks[1] as TaskEntry), false, 'todo')
-  const done = taskOf({
-    id: 't1',
-    title: '线代作业',
-    progress: { current: 20, total: 20 },
-    checkpoints: [],
-    createdAt: '2026-09-18T10:00:00',
-    state: 'done',
-    completedAt: '2026-09-20T21:00:00',
-    overdue: false,
-  })
-  assert.equal(pinShouldRetire(done), true)
+console.log('what the column derives its card from')
+await check('the card is the newest closed session, across both registries', () => {
+  const task = taskFocusing('t1', 'doing', [closed('a', '2026-09-20T09:00:00.000Z', '2026-09-20T09:30:00.000Z')])
+  const media = mediaFocusing('m1', [
+    closed('b', '2026-09-20T11:00:00.000Z', '2026-09-20T11:20:00.000Z'),
+    { id: 'open', startedAt: '2026-09-20T12:00:00.000Z' },
+  ])
+  const recent = recentFocus([task, media])
+  assert.equal(recent?.entry, media, 'the newest session decides the card, not the registry it sits in')
+  assert.equal(recent?.session.id, 'b', 'and an open session is not a fact yet')
 })
 
-await check('media keeps its pin: finished business is not what this rule is about', () => {
-  // A decision, not an oversight: the column is how a half-watched film is
-  // picked up again, and only a task's derived 任务状态 retires it here.
-  const finished = mediaOf({
-    id: 'm1', kind: 'film', title: '流浪地球', status: 'done', createdAt: '2026-09-10T10:00:00',
-  })
-  const dropped = mediaOf({
-    id: 'm2', kind: 'book', title: '三体', status: 'dropped', createdAt: '2026-09-10T10:00:00',
-  })
-  assert.equal(pinShouldRetire(finished), false)
-  assert.equal(pinShouldRetire(dropped), false)
+await check('a completed task keeps its session: finishing is not deleting', () => {
+  // The old pin retired a done task; the card is a fact now, so it stays until
+  // another session becomes the most recent one.
+  const done = taskFocusing('t1', 'done', [closed('a', '2026-09-20T09:00:00.000Z', '2026-09-20T09:30:00.000Z')])
+  assert.equal(recentFocus([done])?.entry, done)
+})
+
+await check('an entry with no closed session is not a candidate', () => {
+  const idle = taskFocusing('t2', 'todo', [])
+  const focused = taskFocusing('t1', 'doing', [closed('a', '2026-09-20T09:00:00.000Z', '2026-09-20T09:30:00.000Z')])
+  assert.equal(recentFocus([idle]), undefined, 'nothing focused yet, so the column is the empty state')
+  assert.equal(recentFocus([idle, focused])?.entry, focused)
 })
 
 console.log(`\n${passed} checks passed`)

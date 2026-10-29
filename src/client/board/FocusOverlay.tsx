@@ -22,7 +22,8 @@ import { staleHostError, type HabitClient, type MediaPatch, type TaskPatch } fro
 import { MAX_IMAGE_BYTES } from '../../shared/route.ts'
 import type { Material, MediaEntry, TaskEntry } from '../types.ts'
 import { dueLevelOf, fractionText, mediaStatusLabel, messageOf, percentOf } from './format.ts'
-import { clockLabel, formatDuration, isEntryView, nowLabel, openSession, type Pinned, type RegistryEntry } from './focus.ts'
+import { formatDuration, isEntryView, nowLabel, type FocusTarget, type RegistryEntry } from './focus.ts'
+import { openSession } from '../../shared/focus-session.ts'
 import { Markdown } from './Markdown.tsx'
 import { IconButton } from './tile.tsx'
 import { createWriteQueue } from './write-queue.ts'
@@ -36,7 +37,7 @@ const NEW_BLOCK = '## 新文本块'
 /** Props for the overlay. */
 export interface FocusOverlayProps {
   readonly client: HabitClient
-  readonly target: Pinned
+  readonly target: FocusTarget
   /** The entry as the panel last saw it; the overlay keeps its own copy after. */
   readonly entry: RegistryEntry
   /**
@@ -273,17 +274,23 @@ export function FocusOverlay({ client, target, entry: initial, today, onClose }:
     window.clearTimeout(notesTimer.current)
     for (const timer of blockTimers.current.values()) window.clearTimeout(timer)
     await queue.current.settled()
+    /** The entry to hand back: the last write's, unless closing says more. */
+    let handedBack = latest.current
     if (sessionId !== null) {
       try {
-        await client.endFocus(target.kind, target.id, sessionId)
+        // This answer is the first thing that knows the session's end, and with
+        // it its duration. Handing `latest` back instead would leave the column
+        // reading this very session as still open until the re-read lands.
+        const answered = await client.endFocus(target.kind, target.id, sessionId)
+        handedBack = adopt(answered.entry) ?? latest.current
       } catch {
         // A session that cannot be closed is dropped by the next start; refusing
         // to leave the mode over it would be worse than losing the tail.
       }
     }
     if (document.fullscreenElement !== null) void document.exitFullscreen().catch(() => {})
-    onClose(latest.current)
-  }, [client, onClose, sessionId, target.id, target.kind])
+    onClose(handedBack)
+  }, [adopt, client, onClose, sessionId, target.id, target.kind])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
