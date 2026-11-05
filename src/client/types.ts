@@ -12,13 +12,16 @@
  *
  * `value` is a fraction, not a flag: vocabulary reports its weighted target
  * progress and a task due that day reports how far along it is, so the bar can
- * read `4.5/9`. `label` comes from the host, which owns the habit names and
- * knows each task's title.
+ * read `4.5/9`. `label` is **content** — a task's title — and is absent for a
+ * habit cell: a habit's name is the panel's, resolved from `id`
+ * (`./board/names.ts`), because a name is a language and the host answers in
+ * none.
  */
 export interface Cell {
   /** A habit cell id, or `task:<id>` for a task due on the day. */
   readonly id: string
-  readonly label: string
+  /** The task's title, for a `task:` cell; absent on a habit cell. */
+  readonly label?: string
   /** Fraction in `[0,1]`: 0 untouched, 1 complete, between = partial. */
   readonly value: number
 }
@@ -329,13 +332,6 @@ export interface ClockView {
 /** One habit's record across a statistics range. */
 export interface HabitStats {
   readonly id: string
-  /**
-   * The habit's display name, from the host's habit inventory.
-   *
-   * Absent when the host half is older than this bundle (it sent the id alone),
-   * which the panel falls back to the id for — the two halves update separately.
-   */
-  readonly label?: string
   readonly met: number
   readonly days: number
   readonly ratio: number

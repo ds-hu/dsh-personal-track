@@ -9,6 +9,7 @@
  */
 import { useReducer, useRef, useState, type JSX } from 'react'
 import type { HabitClient } from '../api.ts'
+import { useCopy, type Copy } from '../copy/index.tsx'
 import type { BackupBundle, ImportMode } from '../types.ts'
 import { IMPORT_IDLE, importer, isBusy, stagedFile, type StagedFile } from './editor-state.ts'
 import { messageOf } from './format.ts'
@@ -23,17 +24,17 @@ function fileStamp(iso: string): string {
 }
 
 /** Read a picked file and check it looks like one of ours. */
-async function stage(file: File): Promise<StagedFile> {
-  if (file.size > MAX_FILE_BYTES) throw new Error('文件超过 64 MB，可能不是本插件的备份')
+async function stage(file: File, t: Copy): Promise<StagedFile> {
+  if (file.size > MAX_FILE_BYTES) throw new Error(t('data.tooBig'))
   let parsed: unknown
   try {
     parsed = JSON.parse(await file.text())
   } catch {
-    throw new Error('文件不是合法的 JSON')
+    throw new Error(t('data.badJson'))
   }
   const shape = parsed as Partial<BackupBundle> | null
   if (shape === null || typeof shape !== 'object' || !Array.isArray(shape.days)) {
-    throw new Error('这不是本插件的备份文件')
+    throw new Error(t('data.notBackup'))
   }
   return { name: file.name, bundle: shape as BackupBundle }
 }
@@ -47,6 +48,7 @@ export interface DataCardProps {
 
 /** Export the domain, or import one back. */
 export function DataCard({ client, onImported }: DataCardProps): JSX.Element {
+  const t = useCopy()
   const picker = useRef<HTMLInputElement | null>(null)
   // One value instead of four flags: "staged and failed at once" is not
   // representable, so a failed attempt cannot hide the file it was retrying.
@@ -57,7 +59,7 @@ export function DataCard({ client, onImported }: DataCardProps): JSX.Element {
   const busy = isBusy(importState)
 
   const report = (cause: unknown): void => {
-    setError(messageOf(cause))
+    setError(messageOf(cause, t))
   }
 
   /** Download the backup the host just built. */
@@ -71,7 +73,7 @@ export function DataCard({ client, onImported }: DataCardProps): JSX.Element {
       link.click()
       URL.revokeObjectURL(url)
       setError(null)
-      setNote(`已导出 ${backup.days.length} 天记录`)
+      setNote(t('data.exported', { days: backup.days.length }))
     } catch (cause) {
       report(cause)
     }
@@ -82,7 +84,7 @@ export function DataCard({ client, onImported }: DataCardProps): JSX.Element {
     if (picked === undefined) return
     dispatch({ kind: 'pick' })
     try {
-      dispatch({ kind: 'picked', file: await stage(picked) })
+      dispatch({ kind: 'picked', file: await stage(picked, t) })
       setError(null)
       setNote(null)
     } catch (cause) {
@@ -99,9 +101,9 @@ export function DataCard({ client, onImported }: DataCardProps): JSX.Element {
       const { report: done } = result
       dispatch({ kind: 'imported' })
       setError(null)
-      setNote(`导入完成：${done.days} 天、${done.media} 影视书籍、${done.tasks} 任务`
-        + (done.assets === 0 ? '' : `、${done.assets} 张图片`)
-        + (done.removed === 0 ? '' : `，清掉 ${done.removed} 条本地多余记录`))
+      setNote(t('data.imported', { days: done.days, media: done.media, tasks: done.tasks })
+        + (done.assets === 0 ? '' : t('data.imported.assets', { count: done.assets }))
+        + (done.removed === 0 ? '' : t('data.imported.removed', { count: done.removed })))
       onImported()
     } catch (cause) {
       dispatch({ kind: 'import-failed' })
@@ -114,23 +116,26 @@ export function DataCard({ client, onImported }: DataCardProps): JSX.Element {
     try {
       const result = await client.sweepAssets()
       setError(null)
-      setNote(result.removed === 0 ? '没有可清理的图片' : `已清理 ${result.removed} 张未引用的图片`)
+      setNote(result.removed === 0
+        ? t('data.nothingToSweep')
+        : t('data.swept', { count: result.removed }))
     } catch (cause) {
       report(cause)
     }
   }
 
+  const staged = file === null ? null : file.bundle as Partial<BackupBundle>
   return (
     <Tile span={2}>
-      <TileHead title="数据" meta={file === null ? undefined : `待导入 ${file.name}`} />
+      <TileHead title={t('data.title')} meta={file === null ? undefined : t('data.pending', { name: file.name })} />
       <div className="pt-rows">
         <div className="pt-tile-foot">
-          <button type="button" className="pt-primary" disabled={busy} onClick={() => void download()}>导出</button>
+          <button type="button" className="pt-primary" disabled={busy} onClick={() => void download()}>{t('data.export')}</button>
           <button type="button" className="pt-ghost" disabled={busy} onClick={() => picker.current?.click()}>
-            选择备份…
+            {t('data.pick')}
           </button>
           <button type="button" className="pt-ghost" disabled={busy} onClick={() => void sweep()}>
-            清理未引用图片
+            {t('data.sweep')}
           </button>
           <input
             ref={picker}
@@ -146,20 +151,22 @@ export function DataCard({ client, onImported }: DataCardProps): JSX.Element {
           />
         </div>
 
-        {file === null ? null : (
+        {staged === null ? null : (
           <div className="pt-tile-foot">
             <span className="pt-muted">
-              {(file.bundle as Partial<BackupBundle>).days?.length ?? 0} 天、
-              {(file.bundle as Partial<BackupBundle>).media?.length ?? 0} 影视书籍、
-              {(file.bundle as Partial<BackupBundle>).tasks?.length ?? 0} 任务
+              {t('data.staged', {
+                days: staged.days?.length ?? 0,
+                media: staged.media?.length ?? 0,
+                tasks: staged.tasks?.length ?? 0,
+              })}
             </span>
             <span className="pt-grow" />
-            <button type="button" className="pt-primary" disabled={busy} onClick={() => void apply('merge')}>合并</button>
+            <button type="button" className="pt-primary" disabled={busy} onClick={() => void apply('merge')}>{t('data.merge')}</button>
             <button type="button" className="pt-ghost" disabled={busy} onClick={() => void apply('replace')}>
-              覆盖（清空现有）
+              {t('data.replace')}
             </button>
             <IconButton
-              label="取消导入"
+              label={t('data.cancel')}
               disabled={busy}
               onClick={() => { dispatch({ kind: 'cancel' }); setError(null) }}
             >×</IconButton>
@@ -170,7 +177,7 @@ export function DataCard({ client, onImported }: DataCardProps): JSX.Element {
           ? <div className="pt-error">{error}</div>
           : (
             <span className="pt-muted">
-              {note ?? '合并：文件中的记录覆盖同键项；覆盖：文件里没有的本地记录会被删除'}
+              {note ?? t('data.note')}
             </span>
           )}
       </div>

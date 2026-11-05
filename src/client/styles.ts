@@ -417,7 +417,12 @@ body[data-ds-dark-theme] .pt-track {
 
 .pt-heat { display: flex; flex-direction: column; gap: 3px; overflow-x: auto; }
 .pt-heat-row { display: flex; align-items: center; gap: 8px; }
-.pt-heat-label { width: 3.6em; flex-shrink: 0; font-size: 11px; opacity: .75; }
+.pt-heat-label {
+  /* English sets this width: "Vocabulary" and "Breakfast" are twice the ems of
+     洗漱 and 早饭, and a content-sized label would break the column alignment
+     between rows. Chinese rows carry the extra space without noticing. */
+  width: 6.2em; flex-shrink: 0; font-size: 11px; opacity: .75;
+}
 .pt-heat-cells { display: flex; gap: 2px; flex: 1; }
 .pt-heat-cell { width: 10px; height: 10px; border-radius: 3px; background: var(--pt-surface-2); flex-shrink: 0; }
 .pt-heat-on { background: var(--pt-accent); }

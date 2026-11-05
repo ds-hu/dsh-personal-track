@@ -19,6 +19,7 @@
  */
 import { useCallback, useEffect, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
 import { staleHostError, type HabitClient, type MediaPatch, type TaskPatch } from '../api.ts'
+import { useCopy, type Copy } from '../copy/index.tsx'
 import { MAX_IMAGE_BYTES } from '../../shared/route.ts'
 import type { Material, MediaEntry, TaskEntry } from '../types.ts'
 import { dueLevelOf, fractionText, mediaStatusLabel, messageOf, percentOf } from './format.ts'
@@ -32,7 +33,9 @@ import { createWriteQueue } from './write-queue.ts'
 const SAVE_DELAY_MS = 800
 
 /** Suggested text for a freshly added block, so the box is never bare. */
-const NEW_BLOCK = '## 新文本块'
+function newBlockOf(copy: Copy): string {
+  return `## ${copy('focus.block.new')}`
+}
 
 /** Props for the overlay. */
 export interface FocusOverlayProps {
@@ -45,8 +48,9 @@ export interface FocusOverlayProps {
    * colours its deadlines with.
    *
    * The overlay must not derive one itself. A local calendar date disagrees
-   * with the habit day for the whole night tail, so the same task read 今天 in
-   * here and 3 天后 on the tile behind it (docs/adr/0005-shared-habit-day.md).
+   * with the habit day for the whole night tail, so the same task read "today"
+   * in here and "in 3 days" on the tile behind it
+   * (docs/adr/0005-shared-habit-day.md).
    * Empty until the clock answers, which {@link dueLevelOf} reads as "no
    * urgency".
    */
@@ -63,14 +67,17 @@ export interface FocusOverlayProps {
 }
 
 /** Read one image file into the wire's shape, or explain why it cannot go. */
-function imageInputOf(file: File): Promise<{ mime: string; data: string; name: string }> {
+function imageInputOf(file: File, copy: Copy): Promise<{ mime: string; data: string; name: string }> {
   return new Promise((resolve, reject) => {
     if (file.size > MAX_IMAGE_BYTES) {
-      reject(new Error(`「${file.name}」超过 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} MB，已拒绝`))
+      reject(new Error(copy('material.tooBig', {
+        name: file.name,
+        limit: Math.round(MAX_IMAGE_BYTES / 1024 / 1024),
+      })))
       return
     }
     const reader = new FileReader()
-    reader.onerror = () => reject(new Error(`「${file.name}」读取失败`))
+    reader.onerror = () => reject(new Error(copy('material.unreadable', { name: file.name })))
     reader.onload = () => {
       const url = typeof reader.result === 'string' ? reader.result : ''
       // A data URL is `data:<mime>;base64,<payload>`; both halves are needed,
@@ -79,7 +86,7 @@ function imageInputOf(file: File): Promise<{ mime: string; data: string; name: s
       const header = url.slice(0, comma)
       const mime = /^data:([^;,]+)/.exec(header)?.[1]
       if (comma < 0 || mime === undefined) {
-        reject(new Error(`「${file.name}」不是可识别的图片`))
+        reject(new Error(copy('material.notImage', { name: file.name })))
         return
       }
       resolve({ mime, data: url.slice(comma + 1), name: file.name })
@@ -97,6 +104,7 @@ function ratioFromPointer(event: ReactPointerEvent<HTMLElement>, element: HTMLEl
 
 /** Render one entry in focus mode. */
 export function FocusOverlay({ client, target, entry: initial, today, onClose }: FocusOverlayProps): JSX.Element {
+  const t = useCopy()
   const [entry, setEntry] = useState<RegistryEntry>(initial)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [notes, setNotes] = useState(initial.notes ?? '')
@@ -127,7 +135,7 @@ export function FocusOverlay({ client, target, entry: initial, today, onClose }:
   const task = isTask ? entry as TaskEntry : null
   const media = isTask ? null : entry as MediaEntry
 
-  const report = useCallback((cause: unknown) => { setError(messageOf(cause)) }, [])
+  const report = useCallback((cause: unknown) => { setError(messageOf(cause, t)) }, [t])
 
   /**
    * Take the entry a write answered with — but only if it is a view.
@@ -135,10 +143,10 @@ export function FocusOverlay({ client, target, entry: initial, today, onClose }:
    * A registry write answers with the entry in the state slice's shape; an
    * older host half answers with the bare stored record, whose materials carry
    * no mime and whose focus total is missing. Adopting one is what used to turn
-   * every image here into "图片缺失" the moment the progress bar was dragged, so
-   * the shape is checked and the situation is named instead. The entry already
-   * on screen is left alone: it is a view, and it is closer to the truth than a
-   * record would be.
+   * every image here into "image missing" the moment the progress bar was
+   * dragged, so the shape is checked and the situation is named instead. The
+   * entry already on screen is left alone: it is a view, and it is closer to
+   * the truth than a record would be.
    *
    * Every adopted entry is also remembered in `latest`: leaving the mode hands
    * that one back, and it must be the *last written*, not whatever the render
@@ -260,9 +268,9 @@ export function FocusOverlay({ client, target, entry: initial, today, onClose }:
    *
    * The wait is the point. The board re-reads its day the moment this returns,
    * and a write still in flight would make that read see the value from before
-   * it — which is exactly what "退出专注后进度条还停在 17" looked like. The timers
-   * are cleared first, so no debounced note or block write can join the queue
-   * after the wait begins.
+   * it — which is exactly what "the bar still reads 17 after leaving focus"
+   * looked like. The timers are cleared first, so no debounced note or block
+   * write can join the queue after the wait begins.
    *
    * The cost is that an unresponsive host delays leaving as much as it already
    * delays `endFocus` below; there is no timeout here for the same reason there
@@ -309,18 +317,18 @@ export function FocusOverlay({ client, target, entry: initial, today, onClose }:
   const addImages = useCallback(async (files: readonly File[]): Promise<void> => {
     const images = files.filter(file => file.type.startsWith('image/'))
     if (images.length === 0) {
-      if (files.length > 0) setError('拖入的文件里没有图片')
+      if (files.length > 0) setError(t('material.noImage'))
       return
     }
     for (const file of images) {
       try {
-        const input = await imageInputOf(file)
+        const input = await imageInputOf(file, t)
         await run(() => client.addImageMaterial(target.kind, target.id, input))
       } catch (cause) {
         report(cause)
       }
     }
-  }, [client, report, run, target.id, target.kind])
+  }, [client, report, run, t, target.id, target.kind])
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent): void => {
@@ -362,11 +370,13 @@ export function FocusOverlay({ client, target, entry: initial, today, onClose }:
   }, [client, run, target.id, target.kind])
 
   const addBlock = useCallback(async (): Promise<void> => {
-    const next = await run(() => client.addTextMaterial(target.kind, target.id, NEW_BLOCK))
+    const next = await run(
+      () => client.addTextMaterial(target.kind, target.id, newBlockOf(t)),
+    )
     if (next === null) return
     const added = [...next.materials].reverse().find(material => material.kind === 'md')
     if (added !== undefined) setEditing(current => new Set(current).add(added.id))
-  }, [client, run, target.id, target.kind])
+  }, [client, run, t, target.id, target.kind])
 
   const removeMaterial = useCallback(async (materialId: string): Promise<void> => {
     await run(() => client.removeMaterial(target.kind, target.id, materialId))
@@ -405,19 +415,23 @@ export function FocusOverlay({ client, target, entry: initial, today, onClose }:
           ? null
           : (
             <span key="due" className={`pt-fo-due pt-due-${dueLevelOf(task.due, today)}`}>
-              截止于{task.due === today ? '今天' : task.due.slice(5)}
+              {task.due === today
+                ? t('focus.due.today')
+                : t('focus.due', { date: task.due.slice(5) })}
             </span>
           ),
-        task.state === 'done' ? <span key="done" className="pt-badge pt-badge-ok">已完成</span> : null,
+        task.state === 'done'
+          ? <span key="done" className="pt-badge pt-badge-ok">{t('chip.done')}</span>
+          : null,
       ]
     : media === null
       ? []
       : [
           <span key="kind" className={media.status === 'done' ? 'pt-badge pt-badge-ok' : 'pt-badge'}>
-            {media.kind === 'film' ? '影' : '书'}
+            {media.kind === 'film' ? t('focus.kind.film') : t('focus.kind.book')}
           </span>,
           <span key="status">
-            {mediaStatusLabel(media.status)}
+            {mediaStatusLabel(media.status, t)}
             {media.rating === undefined ? '' : ` · ★${media.rating}`}
           </span>,
         ]
@@ -448,24 +462,24 @@ export function FocusOverlay({ client, target, entry: initial, today, onClose }:
             <div
               className="pt-fo-stopwatch"
               tabIndex={0}
-              data-tip={`累计专注 ${formatDuration(cumulative)}（含本段）`}
+              data-tip={t('focus.total.live', { duration: formatDuration(cumulative) })}
             >{formatDuration(elapsed)}</div>
-            <div className="pt-fo-now">{nowLabel(new Date(nowMs))}</div>
+            <div className="pt-fo-now">{nowLabel(new Date(nowMs), t)}</div>
           </div>
 
           <div className="pt-fo-notes">
             <div className="pt-fo-notes-head">
-              笔记
+              {t('note.title')}
               <span className={`pt-fo-save pt-fo-save-${saveState}`}>{
-                saveState === 'saving' ? '保存中…'
-                  : saveState === 'error' ? '保存失败'
-                    : saveState === 'saved' ? '已保存 ✓' : ''
+                saveState === 'saving' ? t('note.saving')
+                  : saveState === 'error' ? t('note.saveFailed')
+                    : saveState === 'saved' ? t('note.saved') : ''
               }</span>
             </div>
             <textarea
               className="pt-fo-textarea"
               value={notes}
-              placeholder="随手记：思路、待查、解题步骤……"
+              placeholder={t('note.placeholder')}
               onChange={event => onNotesInput(event.target.value)}
             />
           </div>
@@ -476,18 +490,18 @@ export function FocusOverlay({ client, target, entry: initial, today, onClose }:
             <div className="pt-fo-progress">
               {quantized && task !== null ? (
                 <div className="pt-fo-progress-row">
-                  <span className="pt-fo-progress-label">进度</span>
+                  <span className="pt-fo-progress-label">{t('focus.progress.label')}</span>
                   <button
                     type="button"
                     className="pt-ghost"
                     disabled={busy}
-                    title="减 1"
+                    title={t('focus.progress.minus')}
                     onClick={() => commitProgress(Math.max(0, task.progress.current - 1))}
                   >−</button>
                   <button
                     type="button"
                     className={bar === null ? 'pt-fo-bar' : 'pt-fo-bar pt-fo-bar-active'}
-                    aria-label={`${task.title} 进度`}
+                    aria-label={t('focus.progressOf', { title: task.title })}
                     aria-valuemin={0}
                     aria-valuemax={total}
                     aria-valuenow={shownCount}
@@ -529,7 +543,7 @@ export function FocusOverlay({ client, target, entry: initial, today, onClose }:
                     type="button"
                     className="pt-ghost"
                     disabled={busy}
-                    title="加 1"
+                    title={t('focus.progress.plus')}
                     onClick={() => commitProgress(Math.min(total, task.progress.current + 1))}
                   >＋</button>
                   <span className="pt-fo-reading"><b>{fractionText(shownCount)}</b>/{fractionText(total)}</span>
@@ -541,7 +555,7 @@ export function FocusOverlay({ client, target, entry: initial, today, onClose }:
                     className="pt-primary"
                     disabled={busy}
                     onClick={() => commitProgress(task.state === 'done' ? 0 : 1)}
-                  >{task.state === 'done' ? '标记未完成' : '标记完成'}</button>
+                  >{task.state === 'done' ? t('focus.markUndone') : t('focus.markDone')}</button>
                 </div>
               ) : null}
 
@@ -552,12 +566,15 @@ export function FocusOverlay({ client, target, entry: initial, today, onClose }:
                       key={checkpoint.id}
                       type="button"
                       className={task.progress.current >= checkpoint.at ? 'pt-fo-cp pt-fo-cp-ok' : 'pt-fo-cp'}
-                      title="进度跳到这里"
+                      title={t('checkpoint.jump')}
                       disabled={busy}
                       onClick={() => commitProgress(checkpoint.at)}
                     >
                       <span className="pt-fo-dot" />
-                      {checkpoint.label} @{checkpoint.at} · {task.progress.current >= checkpoint.at ? '已到' : '未到'}
+                      {checkpoint.label} @{checkpoint.at}{' · '}
+                      {task.progress.current >= checkpoint.at
+                        ? t('checkpoint.reached')
+                        : t('checkpoint.ahead')}
                     </button>
                   ))}
                 </div>
@@ -568,22 +585,28 @@ export function FocusOverlay({ client, target, entry: initial, today, onClose }:
               <button
                 type="button"
                 className="pt-fo-ctl"
-                title="切换浏览器全屏"
+                title={t('focus.fullscreen.toggle')}
                 onClick={() => {
                   const element = root.current
                   if (document.fullscreenElement !== null) {
                     void document.exitFullscreen().catch(() => {})
                   } else if (element !== null && element.requestFullscreen !== undefined) {
-                    void element.requestFullscreen().catch(() => setError('浏览器拒绝了全屏请求，已用页内全屏'))
+                    void element.requestFullscreen()
+                      .catch(() => setError(t('focus.fullscreen.denied')))
                   }
                 }}
               >
                 <span className="pt-fo-ctl-icon">⤢</span>
-                <span>{fullscreen ? '退出全屏' : '屏幕全屏'}</span>
+                <span>{fullscreen ? t('focus.fullscreen.exit') : t('focus.fullscreen.enter')}</span>
               </button>
-              <button type="button" className="pt-fo-ctl pt-fo-ctl-danger" title="退出专注（Esc）" onClick={() => void close()}>
+              <button
+                type="button"
+                className="pt-fo-ctl pt-fo-ctl-danger"
+                title={t('focus.exit.title')}
+                onClick={() => void close()}
+              >
                 <span className="pt-fo-ctl-icon">×</span>
-                <span>退出专注</span>
+                <span>{t('focus.exit')}</span>
               </button>
             </div>
           </div>
@@ -591,17 +614,19 @@ export function FocusOverlay({ client, target, entry: initial, today, onClose }:
           <div className="pt-fo-materials">
             <div className="pt-fo-mat-col">
               <div className="pt-fo-mat-head">
-                <span className="pt-fo-mat-title">素材</span>
-                <span className="pt-fo-mat-meta">{materialsLabel(entry.materials)}</span>
+                <span className="pt-fo-mat-title">{t('material.title')}</span>
+                <span className="pt-fo-mat-meta">{materialsLabel(entry.materials, t)}</span>
                 <span className="pt-grow" />
                 <div className="pt-fo-mat-actions">
-                  <button type="button" className="pt-ghost" disabled={busy} onClick={() => void addBlock()}>＋ 文本</button>
+                  <button type="button" className="pt-ghost" disabled={busy} onClick={() => void addBlock()}>
+                    ＋ {t('material.text')}
+                  </button>
                   <button
                     type="button"
                     className="pt-primary"
                     disabled={busy}
                     onClick={() => picker.current?.click()}
-                  >添加图片…</button>
+                  >{t('material.addImage')}</button>
                 </div>
               </div>
 
@@ -619,13 +644,13 @@ export function FocusOverlay({ client, target, entry: initial, today, onClose }:
                 }}
               />
 
-              <div className="pt-fo-drop">粘贴或拖入图片</div>
+              <div className="pt-fo-drop">{t('material.dropHint')}</div>
 
               <div className="pt-fo-list">
                 {entry.materials.map(material => material.kind === 'md' ? (
                   <div className="pt-fo-md" key={material.id}>
                     <div className="pt-fo-md-head">
-                      <span className="pt-badge">文本 · Markdown</span>
+                      <span className="pt-badge">{t('material.markdown')}</span>
                       {editing.has(material.id)
                         ? (
                           <button
@@ -641,7 +666,7 @@ export function FocusOverlay({ client, target, entry: initial, today, onClose }:
                               })
                               void run(() => client.patchTextMaterial(target.kind, target.id, material.id, text))
                             }}
-                          >完成编辑</button>
+                          >{t('material.done')}</button>
                         )
                         : (
                           <button
@@ -651,10 +676,14 @@ export function FocusOverlay({ client, target, entry: initial, today, onClose }:
                               setDrafts(current => ({ ...current, [material.id]: material.text }))
                               setEditing(current => new Set(current).add(material.id))
                             }}
-                          >编辑</button>
+                          >{t('tile.edit')}</button>
                         )}
                       <span className="pt-grow" />
-                      <IconButton label="删除这块" disabled={busy} onClick={() => void removeMaterial(material.id)}>×</IconButton>
+                      <IconButton
+                        label={t('material.removeBlock')}
+                        disabled={busy}
+                        onClick={() => void removeMaterial(material.id)}
+                      >×</IconButton>
                     </div>
                     {editing.has(material.id)
                       ? (
@@ -676,13 +705,15 @@ export function FocusOverlay({ client, target, entry: initial, today, onClose }:
                   // this even though the import refuses it. Say so instead of
                   // drawing a broken picture with no explanation.
                   <div className="pt-fo-img-missing" key={material.id}>
-                    <span className="pt-muted">图片缺失：{material.name ?? material.assetId}</span>
+                    <span className="pt-muted">
+                      {t('material.missing', { name: material.name ?? material.assetId })}
+                    </span>
                     <button
                       type="button"
                       className="pt-ghost"
                       disabled={busy}
                       onClick={() => void removeMaterial(material.id)}
-                    >移除这条</button>
+                    >{t('material.removeEntry')}</button>
                   </div>
                 ) : (
                   <div className="pt-fo-img-wrap" key={material.id}>
@@ -690,15 +721,15 @@ export function FocusOverlay({ client, target, entry: initial, today, onClose }:
                       <img
                         className={zoomed === material.id ? 'pt-fo-img pt-fo-img-full' : 'pt-fo-img'}
                         src={client.assetUrl(material.assetId)}
-                        alt={material.name ?? '素材图'}
-                        title={zoomed === material.id ? '缩回整页适应' : '查看原始尺寸'}
+                        alt={material.name ?? t('material.imageAlt')}
+                        title={zoomed === material.id ? t('material.zoomOut') : t('material.zoomIn')}
                         onClick={() => setZoomed(current => (current === material.id ? null : material.id))}
                       />
                     </div>
                     <button
                       type="button"
                       className="pt-fo-img-del"
-                      title="删除这张"
+                      title={t('material.removeImage')}
                       disabled={busy}
                       onClick={() => void removeMaterial(material.id)}
                     >×</button>
@@ -715,14 +746,17 @@ export function FocusOverlay({ client, target, entry: initial, today, onClose }:
   )
 }
 
-/** `3 文本 · 2 图 · 1.4 MB`, or `空` for no materials at all. */
-function materialsLabel(materials: readonly Material[]): string {
+/**
+ * The materials' figures — `3 文本 · 2 图` in Chinese, `3 text · 2 images` in
+ * English, with the total size after them — or the empty word for none at all.
+ */
+function materialsLabel(materials: readonly Material[], copy: Copy): string {
   const texts = materials.filter(material => material.kind === 'md').length
   const images = materials.filter(material => material.kind === 'image')
   const bytes = images.reduce((sum, image) => sum + (image.bytes ?? 0), 0)
-  if (materials.length === 0) return '空'
+  if (materials.length === 0) return copy('material.none')
   const size = bytes === 0
     ? ''
     : ` · ${bytes > 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`}`
-  return `${texts} 文本 · ${images.length} 图${size}`
+  return `${copy('material.counts', { texts, images: images.length })}${size}`
 }

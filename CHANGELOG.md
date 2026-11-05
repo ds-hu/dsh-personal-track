@@ -5,7 +5,20 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **界面双语**：看板、统计、专注模式、表单、错误与**复制出的报告**全部跟随外壳的语言，
+  切换即时生效，不用重启。中文与英文各一本词典，键集合由构造保证相同。
+  英文是逐条写出来的翻译，不是中文的转写；数字、配速、里程、单位不翻译，只有词跟着走。
+
 ### 变更
+
+- **习惯与格的名字不再由宿主下发**：宿主只持有 id，面板从 `habit.<id>` / `cell.<id>` 取名。
+  改一条译名因此不需要重启宿主那一半。旧宿主（没有 `locale` 服务）会让整块面板起不来，
+  这是有意的：半个界面说着上一门语言比报错更难查。
+- **失败信息由面板翻译**：宿主改为下发 `code` 与它需要的数字（`habit/check-limit` 带上
+  哪个习惯、`habit/range-too-large` 带上限天数），句子归词典；不认识的 code 退回
+  宿主自带那句并附上 code，所以新宿主配旧面板仍然可读。
 
 - **复制出的纯文本报告**：任务列表不再只列未完成的。每条任务都写截止日（`月-日`），
   逾期的一并注明「逾期」；**当日及以后截止的已完成任务**也列进来（行末 ` ✓`），
@@ -38,6 +51,23 @@
 - 曲线与前沿的颜色走内联 `style`，不用 `fill` / `stroke` 属性：表现属性会被样式表里任何一条
   同名规则压掉，`.pt-curve-dot { fill }` 曾让五档颜色全退回同一个绿。`verify-client` 另加两条
   守卫——五个 `--pt-curve-N` 必须齐全，且必须同时给出浅色与 `body[data-ds-dark-theme]` 两套。
+- 新增 `src/client/copy/table.ts`：357 行 `{ zh, en }`，两本词典由它投影，所以"键集合相同"
+  是形状而不是纪律；`tests/copy.test.ts` 断言的是构造看不到的那部分——英文里没有残留中文、
+  两边的占位符名字一致、填完不留花括号。
+- `src/client/copy/index.tsx`（`useCopy` + `CopyProvider`）与 `src/client/locale.ts`。
+  `t` 走 React context 而不是 props：整块面板是一棵树，25 个组件传一个函数没有意义；
+  provider 订阅 `locale.subscribe`，因为切语言不是重新挂载——不订阅的话每个标签都停在挂载时那一门语言。
+  `locale.ts` 只声明用到的四个成员（`register` / `bind` / `getLocale` / `subscribe`），
+  因为 `@deepseek-ai/dsh-client-locale` 不在本仓库的 devDeps 里（那套是 0.1.5，运行时是 0.2.2），
+  把它的 `.d.ts` 拉进来会连带 package-manifest 与 settings 两张类型网。
+- `shared/rope.ts` 的 `ropeDurationText` 换成 `ropeDurationOf`（返回 `{unit, value}`）：
+  共用模块决定"用秒还是用分"，词归面板——原来那个函数直接返回 `45 秒`，等于让两半身共用的部分拥有了一门语言。
+- `verify-client` 新增两条守卫：注册进 `locale` 的两本词典必须键集合相同（且不再是占位集），
+  以及 `src/client` 里除 `copy/table.ts` 之外**不允许出现汉字字面量**（注释先剥掉）——
+  后者是源码遍历而不是产物扫描，因为产物里词典本来就有中文。
+  注入验证：往 `Chip.tsx` 塞一个中文 `title`，第一条守卫以 exit 1 失败；从英文词典里删掉一个键，
+  第二条以 exit 1 失败（需先 rebuild，守卫读的是产物）。两次恢复后 sha256 均与注入前一致。
+
 
 ## [0.4.0] - 2026-10-28
 

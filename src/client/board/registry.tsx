@@ -11,7 +11,9 @@
  */
 import { useReducer, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
 import type { MediaInput, MediaPatch, TaskInput, TaskPatch } from '../api.ts'
-import type { MediaEntry, TaskEntry } from '../types.ts'
+import { useCopy, type Copy } from '../copy/index.tsx'
+import type { CopyKey } from '../copy/table.ts'
+import type { MediaEntry, TaskEntry, TaskState } from '../types.ts'
 import { IDLE, editor, isAdding, isEditing, type EditorAction, type EditorState } from './editor-state.ts'
 import { FieldForm, type FieldSpec } from './fields.tsx'
 import { dueLevelOf, fractionText, formatCheckpoints, mediaStatusLabel, parseCheckpoints, percentOf, timeOf, weekEndKey } from './format.ts'
@@ -29,43 +31,47 @@ function useEditor(ids: readonly string[]): [Mode, (action: EditorAction) => voi
   )
 }
 
-/** Fields a media entry exposes. */
-const MEDIA_FIELDS: readonly FieldSpec[] = [
-  {
-    name: 'kind',
-    label: '类型',
-    kind: 'select',
-    defaultValue: 'film',
-    options: [{ value: 'film', label: '电影' }, { value: 'book', label: '书' }],
-  },
-  { name: 'title', label: '名称', kind: 'text' },
-  {
-    name: 'status',
-    label: '状态',
-    kind: 'select',
-    defaultValue: 'active',
-    options: [
-      { value: 'active', label: '在看/在读' },
-      { value: 'done', label: '完成' },
-      { value: 'dropped', label: '弃' },
-    ],
-  },
-  { name: 'rating', label: '评分', kind: 'number', min: 1, max: 5, optional: true, placeholder: '1-5' },
-  // The same field focus mode edits at length, so the board must not be the
-  // place a long note gets flattened into one line.
-  { name: 'notes', label: '备注', kind: 'textarea', optional: true, wide: true },
-]
+/** Fields a media entry exposes. Built per render: their labels are words. */
+function mediaFields(t: Copy): readonly FieldSpec[] {
+  return [
+    {
+      name: 'kind',
+      label: t('media.field.kind'),
+      kind: 'select',
+      defaultValue: 'film',
+      options: [{ value: 'film', label: t('media.kind.film') }, { value: 'book', label: t('media.kind.book') }],
+    },
+    { name: 'title', label: t('media.field.title'), kind: 'text' },
+    {
+      name: 'status',
+      label: t('media.field.status'),
+      kind: 'select',
+      defaultValue: 'active',
+      options: [
+        { value: 'active', label: t('media.status.active') },
+        { value: 'done', label: t('media.status.done') },
+        { value: 'dropped', label: t('media.status.dropped') },
+      ],
+    },
+    { name: 'rating', label: t('media.field.rating'), kind: 'number', min: 1, max: 5, optional: true, placeholder: '1-5' },
+    // The same field focus mode edits at length, so the board must not be the
+    // place a long note gets flattened into one line.
+    { name: 'notes', label: t('registry.field.notes'), kind: 'textarea', optional: true, wide: true },
+  ]
+}
 
 /** Fields a task exposes (progress is flattened for the form). */
-const TASK_FIELDS: readonly FieldSpec[] = [
-  { name: 'title', label: '事项', kind: 'text' },
-  { name: 'category', label: '分类', kind: 'text', optional: true, placeholder: '课程名等' },
-  { name: 'due', label: '截止', kind: 'date', optional: true },
-  { name: 'current', label: '当前', kind: 'number', min: 0, optional: true },
-  { name: 'total', label: '目标量', kind: 'number', min: 1, optional: true },
-  { name: 'checkpoints', label: '检查点', kind: 'textarea', optional: true, placeholder: '每行一个：第一章@10', wide: true },
-  { name: 'notes', label: '备注', kind: 'textarea', optional: true, wide: true },
-]
+function taskFields(t: Copy): readonly FieldSpec[] {
+  return [
+    { name: 'title', label: t('task.field.title'), kind: 'text' },
+    { name: 'category', label: t('task.field.category'), kind: 'text', optional: true, placeholder: t('task.field.categoryHint') },
+    { name: 'due', label: t('task.field.due'), kind: 'date', optional: true },
+    { name: 'current', label: t('task.field.current'), kind: 'number', min: 0, optional: true },
+    { name: 'total', label: t('task.field.total'), kind: 'number', min: 1, optional: true },
+    { name: 'checkpoints', label: t('task.field.checkpoints'), kind: 'textarea', optional: true, placeholder: t('task.field.checkpointsHint'), wide: true },
+    { name: 'notes', label: t('registry.field.notes'), kind: 'textarea', optional: true, wide: true },
+  ]
+}
 
 /**
  * Task fields for a *new* task, whose deadline starts at this week's end.
@@ -74,9 +80,9 @@ const TASK_FIELDS: readonly FieldSpec[] = [
  * pre-filling; it stays an ordinary optional date field, freely changed or
  * cleared. Built per render — a module-level default would freeze at import.
  */
-function newTaskFields(today: string): readonly FieldSpec[] {
+function newTaskFields(today: string, t: Copy): readonly FieldSpec[] {
   const weekend = weekEndKey(today)
-  return TASK_FIELDS.map(field => (field.name === 'due' ? { ...field, defaultValue: weekend } : field))
+  return taskFields(t).map(field => (field.name === 'due' ? { ...field, defaultValue: weekend } : field))
 }
 
 /** Display text for a media status; the label table lives in `format.ts`. */
@@ -111,26 +117,27 @@ function mediaPatch(payload: Record<string, unknown>, original: MediaEntry): Med
  * and none may sit past it. Clearing the total while keeping checkpoints is
  * the same fault — hence the payload's own `total`, never the record's.
  */
-function taskFormProblem(payload: Record<string, unknown>): string | undefined {
+function taskFormProblem(payload: Record<string, unknown>, t: Copy): string | undefined {
   const text = typeof payload.checkpoints === 'string' ? payload.checkpoints : ''
   if (text.trim() === '') return undefined
-  const { list, problem } = parseCheckpoints(text)
+  const { list, problem } = parseCheckpoints(text, t)
   if (problem !== undefined) return problem
-  if (typeof payload.total !== 'number') return '检查点需要目标量'
+  if (typeof payload.total !== 'number') return t('task.checkpoint.needTotal')
   const total = payload.total
   const beyond = list.find(checkpoint => checkpoint.at > total)
   return beyond === undefined
     ? undefined
-    : `检查点「${beyond.label}」的位置 ${beyond.at} 超过目标量 ${total}`
+    : t('task.checkpoint.beyond', { label: beyond.label, at: beyond.at, total })
 }
 
 /** A payload for a new task; empty optional fields are omitted. */
-function taskInput(payload: Record<string, unknown>): TaskInput {
+function taskInput(payload: Record<string, unknown>, t: Copy): TaskInput {
   const progress: { current?: number; total?: number } = {}
   if (typeof payload.current === 'number') progress.current = payload.current
   if (typeof payload.total === 'number') progress.total = payload.total
   const checkpoints = parseCheckpoints(
     typeof payload.checkpoints === 'string' ? payload.checkpoints : '',
+    t,
   ).list
   return {
     title: String(payload.title ?? ''),
@@ -143,7 +150,7 @@ function taskInput(payload: Record<string, unknown>): TaskInput {
 }
 
 /** A task patch; emptied fields the record had are cleared, progress merges. */
-function taskPatch(payload: Record<string, unknown>, original: TaskEntry): TaskPatch {
+function taskPatch(payload: Record<string, unknown>, original: TaskEntry, t: Copy): TaskPatch {
   const patch: Record<string, unknown> = {}
   if (typeof payload.title === 'string') patch.title = payload.title
   for (const key of ['category', 'due', 'notes'] as const) {
@@ -160,6 +167,7 @@ function taskPatch(payload: Record<string, unknown>, original: TaskEntry): TaskP
   // "remove them all" — an empty list is sent, not an absent key.
   patch.checkpoints = parseCheckpoints(
     typeof payload.checkpoints === 'string' ? payload.checkpoints : '',
+    t,
   ).list
   return patch as TaskPatch
 }
@@ -188,17 +196,19 @@ function isSettled(entry: MediaEntry): boolean {
 
 /** What has been watched and read: a log, written after the fact. */
 export function MediaTile({ media, busy, onAdd, onPatch, onRemove, onFocus }: MediaTileProps): JSX.Element {
+  const t = useCopy()
   const [mode, dispatch] = useEditor(media.map(entry => entry.id))
   const live = media.filter(entry => !isSettled(entry))
   const settled = media.filter(isSettled)
   const active = live.length
+  const fields = mediaFields(t)
 
   /** One entry, as the open editor or as its row — the same in either list. */
   const renderEntry = (entry: MediaEntry): JSX.Element => (isEditing(mode, entry.id)
     ? (
       <FieldForm
         key={entry.id}
-        fields={MEDIA_FIELDS}
+        fields={fields}
         initial={{
           kind: entry.kind,
           title: entry.title,
@@ -206,7 +216,7 @@ export function MediaTile({ media, busy, onAdd, onPatch, onRemove, onFocus }: Me
           rating: entry.rating,
           notes: entry.notes,
         }}
-        submitLabel="保存"
+        submitLabel={t('form.save')}
         busy={busy}
         onSubmit={(payload) => {
           onPatch(entry.id, mediaPatch(payload, entry))
@@ -217,39 +227,42 @@ export function MediaTile({ media, busy, onAdd, onPatch, onRemove, onFocus }: Me
     )
     : (
       <div className="pt-list-row" key={entry.id}>
-        <span className="pt-list-text pt-row-open" title="进入专注模式" onClick={() => onFocus(entry)}>
+        <span className="pt-list-text pt-row-open" title={t('registry.openFocus')} onClick={() => onFocus(entry)}>
           <span className={entry.status === 'done' ? 'pt-badge pt-badge-ok' : 'pt-badge'}>
-            {entry.kind === 'film' ? '影' : '书'}
+            {t(entry.kind === 'film' ? 'focus.kind.film' : 'focus.kind.book')}
           </span>
           {' '}
           {entry.title}
           {entry.rating === undefined ? null : <span className="pt-muted"> ★{entry.rating}</span>}
-          <span className="pt-muted"> · {mediaStatusLabel(entry.status)}</span>
+          <span className="pt-muted"> · {mediaStatusLabel(entry.status, t)}</span>
         </span>
-        <IconButton label="专注" disabled={busy} onClick={() => onFocus(entry)}>⤢</IconButton>
-        <IconButton label="编辑" disabled={busy} onClick={() => dispatch({ kind: 'edit', id: entry.id })}>✎</IconButton>
-        <IconButton label="删除" disabled={busy} onClick={() => onRemove(entry.id)}>×</IconButton>
+        <IconButton label={t('tile.focus')} disabled={busy} onClick={() => onFocus(entry)}>⤢</IconButton>
+        <IconButton label={t('tile.edit')} disabled={busy} onClick={() => dispatch({ kind: 'edit', id: entry.id })}>✎</IconButton>
+        <IconButton label={t('tile.remove')} disabled={busy} onClick={() => onRemove(entry.id)}>×</IconButton>
       </div>
     ))
 
   return (
     <Tile span={2}>
-      <TileHead title="影视 / 书籍" meta={media.length === 0 ? '空' : `在列 ${active}`}>
-        <IconButton label="新增记录" disabled={busy} onClick={() => dispatch({ kind: 'open-add' })}>＋</IconButton>
+      <TileHead
+        title={t('media.title')}
+        meta={media.length === 0 ? t('media.empty') : t('media.live', { count: active })}
+      >
+        <IconButton label={t('media.add')} disabled={busy} onClick={() => dispatch({ kind: 'open-add' })}>＋</IconButton>
       </TileHead>
 
       {media.length === 0 && mode.kind === 'idle'
-        ? <span className="pt-muted">看完一部、读完一本，随时补记</span>
+        ? <span className="pt-muted">{t('media.emptyHint')}</span>
         : null}
       {media.length > 0 && live.length === 0 && mode.kind === 'idle'
-        ? <span className="pt-muted">没有在看或在读的记录</span>
+        ? <span className="pt-muted">{t('media.noneLive')}</span>
         : null}
 
       {live.map(renderEntry)}
 
       {settled.length === 0 ? null : (
         <details className="pt-archive">
-          <summary title="已完成或已放弃的记录">归档 {settled.length} 条</summary>
+          <summary title={t('media.archiveTitle')}>{t('registry.archive', { count: settled.length })}</summary>
           {settled.map(renderEntry)}
         </details>
       )}
@@ -257,8 +270,8 @@ export function MediaTile({ media, busy, onAdd, onPatch, onRemove, onFocus }: Me
       {isAdding(mode)
         ? (
           <FieldForm
-            fields={MEDIA_FIELDS}
-            submitLabel="记下"
+            fields={fields}
+            submitLabel={t('media.record')}
             busy={busy}
             onSubmit={(payload) => {
               onAdd(mediaInput(payload))
@@ -285,9 +298,9 @@ export interface TaskTileProps {
   readonly onFocus: (entry: TaskEntry) => void
 }
 
-/** The deadline as the row shows it: "今天" when it is, else `MM-DD`. */
-function dueText(due: string, today: string): string {
-  return due === today ? '今天' : due.slice(5)
+/** The deadline as the row shows it: "today" when it is, else `MM-DD`. */
+function dueText(due: string, today: string, t: Copy): string {
+  return due === today ? t('focus.due.today') : t('focus.due', { date: due.slice(5) })
 }
 
 /**
@@ -317,28 +330,58 @@ function barValue(entry: TaskEntry, ratio: number): number {
   return Math.max(0, Math.min(total, Math.round(ratio * total)))
 }
 
+/** Where a task stands, as the bar's tooltip says it: its state, or overdue. */
+type BarState = TaskState | 'overdue'
+
+/** The state's own word, for a task with no target amount to report. */
+const STATE_WORD: Readonly<Record<BarState, CopyKey>> = {
+  done: 'chip.done',
+  overdue: 'task.state.overdue',
+  doing: 'task.state.doing',
+  todo: 'chip.missing',
+}
+
+/** The same state with the percentage and the count, for a task that has one. */
+const STATE_FIGURES: Readonly<Record<BarState, CopyKey>> = {
+  done: 'task.bar.done',
+  overdue: 'task.bar.overdue',
+  doing: 'task.bar.doing',
+  todo: 'task.bar.todo',
+}
+
 /** What the bar's tooltip reads. */
-function barTitle(entry: TaskEntry, dragging: boolean): string {
+function barTitle(entry: TaskEntry, dragging: boolean, t: Copy): string {
   const { current, total } = entry.progress
   const quantized = total !== undefined && total > 0
-  const state = entry.state === 'done'
-    ? '已完成'
-    : entry.overdue ? '逾期未完成' : current > 0 ? '进行中' : '未完成'
+  const state: BarState = entry.state === 'done'
+    ? 'done'
+    : entry.overdue ? 'overdue' : current > 0 ? 'doing' : 'todo'
   const parts = [
     quantized
-      ? `${state} ${percentOf(ratioOf(entry))}%（${fractionText(current)}/${fractionText(total)}）`
-      : state,
+      ? t(STATE_FIGURES[state], {
+        percent: percentOf(ratioOf(entry)),
+        current: fractionText(current),
+        total: fractionText(total),
+      })
+      : t(STATE_WORD[state]),
   ]
   if (entry.completedAt !== undefined) {
     const date = entry.completedAt.slice(0, 10)
-    parts.push(`完成于 ${date.slice(5)} ${timeOf(entry.completedAt)}`)
+    parts.push(t('task.completedAt', { date: `${date.slice(5)} ${timeOf(entry.completedAt)}` }))
   }
   for (const checkpoint of [...entry.checkpoints].sort((a, b) => a.at - b.at)) {
     parts.push(checkpoint.reachedAt === undefined
-      ? `${checkpoint.label}@${checkpoint.at} 未到`
-      : `${checkpoint.label}@${checkpoint.at} 已到 ${checkpoint.reachedAt.slice(5, 10)} ${timeOf(checkpoint.reachedAt)}`)
+      ? t('task.checkpoint.pending', { label: checkpoint.label, at: checkpoint.at })
+      : t('task.checkpoint.reached', {
+        label: checkpoint.label,
+        at: checkpoint.at,
+        date: checkpoint.reachedAt.slice(5, 10),
+        time: timeOf(checkpoint.reachedAt),
+      }))
   }
-  parts.push(dragging ? '松开写入进度' : quantized ? '拖动或 ←/→ 调整进度' : '点击切换完成，←/→ 也可')
+  parts.push(dragging
+    ? t('task.bar.release')
+    : quantized ? t('task.bar.drag') : t('task.bar.click'))
   return parts.join(' · ')
 }
 
@@ -365,6 +408,7 @@ function TaskRow({ entry, today, busy, onPatch, onEdit, onRemove, onFocus }: {
   readonly onRemove: () => void
   readonly onFocus: () => void
 }): JSX.Element {
+  const t = useCopy()
   const [drag, setDrag] = useState<number | null>(null)
   const total = entry.progress.total
   const quantized = total !== undefined && total > 0
@@ -388,13 +432,13 @@ function TaskRow({ entry, today, busy, onPatch, onEdit, onRemove, onFocus }: {
   return (
     <div className={entry.overdue && entry.state !== 'done' ? 'pt-task pt-task-late' : 'pt-task'}>
       <div className="pt-task-head">
-        <span className="pt-task-title pt-row-open" title="进入专注模式" onClick={onFocus}>{entry.title}</span>
+        <span className="pt-task-title pt-row-open" title={t('registry.openFocus')} onClick={onFocus}>{entry.title}</span>
         {entry.category === undefined ? null : <span className="pt-muted">({entry.category})</span>}
         {entry.due === undefined
           ? null
           : (
             <span className={`pt-task-due pt-due-${dueLevelOf(entry.due, today)}`}>
-              截止于{dueText(entry.due, today)}
+              {dueText(entry.due, today, t)}
             </span>
           )}
       </div>
@@ -404,8 +448,8 @@ function TaskRow({ entry, today, busy, onPatch, onEdit, onRemove, onFocus }: {
           type="button"
           className={barClass}
           disabled={busy}
-          title={barTitle(entry, drag !== null)}
-          aria-label={`${entry.title} 进度`}
+          title={barTitle(entry, drag !== null, t)}
+          aria-label={t('task.progressLabel', { title: entry.title })}
           aria-valuemin={0}
           aria-valuemax={quantized ? total : 1}
           aria-valuenow={shown}
@@ -470,17 +514,17 @@ function TaskRow({ entry, today, busy, onPatch, onEdit, onRemove, onFocus }: {
           ? (
             <span
               className={drag === null ? 'pt-task-count' : 'pt-task-count pt-task-count-live'}
-              title="当前 / 目标量"
+              title={t('task.count')}
               style={{ minWidth: `${countWidth}ch` }}
             >
               {fractionText(shown)}/{fractionText(total)}
             </span>
           )
           : null}
-        {entry.state === 'done' ? <span className="pt-task-ok" title="已完成">✓</span> : null}
-        <IconButton label="专注" disabled={busy} onClick={onFocus}>⤢</IconButton>
-        <IconButton label="编辑" disabled={busy} onClick={onEdit}>✎</IconButton>
-        <IconButton label="删除" disabled={busy} onClick={onRemove}>×</IconButton>
+        {entry.state === 'done' ? <span className="pt-task-ok" title={t('chip.done')}>✓</span> : null}
+        <IconButton label={t('tile.focus')} disabled={busy} onClick={onFocus}>⤢</IconButton>
+        <IconButton label={t('tile.edit')} disabled={busy} onClick={onEdit}>✎</IconButton>
+        <IconButton label={t('tile.remove')} disabled={busy} onClick={onRemove}>×</IconButton>
       </div>
     </div>
   )
@@ -505,6 +549,7 @@ function isArchived(task: TaskEntry, today: string): boolean {
  * registry in it too.
  */
 export function TaskTile({ tasks, today, busy, onAdd, onPatch, onRemove, onFocus }: TaskTileProps): JSX.Element {
+  const t = useCopy()
   const [mode, dispatch] = useEditor(tasks.map(task => task.id))
   const open = tasks.filter(task => task.state !== 'done').length
   const overdue = tasks.filter(task => task.overdue).length
@@ -512,13 +557,14 @@ export function TaskTile({ tasks, today, busy, onAdd, onPatch, onRemove, onFocus
   const ordered = [...tasks].sort(byDeadline)
   const live = ordered.filter(task => !isArchived(task, today))
   const archived = ordered.filter(task => isArchived(task, today))
+  const fields = taskFields(t)
 
   /** One task, as the open editor or as its row — the same in either list. */
   const renderTask = (task: TaskEntry): JSX.Element => (isEditing(mode, task.id)
     ? (
       <FieldForm
         key={task.id}
-        fields={TASK_FIELDS}
+        fields={fields}
         initial={{
           title: task.title,
           category: task.category,
@@ -528,11 +574,11 @@ export function TaskTile({ tasks, today, busy, onAdd, onPatch, onRemove, onFocus
           checkpoints: formatCheckpoints(task.checkpoints),
           notes: task.notes,
         }}
-        validate={taskFormProblem}
-        submitLabel="保存"
+        validate={payload => taskFormProblem(payload, t)}
+        submitLabel={t('form.save')}
         busy={busy}
         onSubmit={(payload) => {
-          onPatch(task.id, taskPatch(payload, task))
+          onPatch(task.id, taskPatch(payload, task, t))
           dispatch({ kind: 'close' })
         }}
         onCancel={() => dispatch({ kind: 'close' })}
@@ -554,22 +600,26 @@ export function TaskTile({ tasks, today, busy, onAdd, onPatch, onRemove, onFocus
   return (
     <Tile span={2}>
       <TileHead
-        title="任务 / 作业"
-        meta={`未完成 ${open}${dueToday === 0 ? '' : ` · 今日到期 ${dueToday}`}${overdue === 0 ? '' : ` · 逾期 ${overdue}`}`}
+        title={t('task.title')}
+        meta={[
+          t('task.meta.open', { count: open }),
+          ...(dueToday === 0 ? [] : [t('task.meta.today', { count: dueToday })]),
+          ...(overdue === 0 ? [] : [t('task.meta.overdue', { count: overdue })]),
+        ].join(' · ')}
       >
-        <IconButton label="新建任务" disabled={busy} onClick={() => dispatch({ kind: 'open-add' })}>＋</IconButton>
+        <IconButton label={t('task.add')} disabled={busy} onClick={() => dispatch({ kind: 'open-add' })}>＋</IconButton>
       </TileHead>
 
-      {tasks.length === 0 && mode.kind === 'idle' ? <span className="pt-muted">还没有任务</span> : null}
+      {tasks.length === 0 && mode.kind === 'idle' ? <span className="pt-muted">{t('task.empty')}</span> : null}
       {tasks.length > 0 && live.length === 0 && mode.kind === 'idle'
-        ? <span className="pt-muted">没有进行中的任务</span>
+        ? <span className="pt-muted">{t('task.noneLive')}</span>
         : null}
 
       {live.map(renderTask)}
 
       {archived.length === 0 ? null : (
         <details className="pt-archive">
-          <summary title="过了截止日且已完成的任务">归档 {archived.length} 条</summary>
+          <summary title={t('task.archiveTitle')}>{t('registry.archive', { count: archived.length })}</summary>
           {archived.map(renderTask)}
         </details>
       )}
@@ -577,12 +627,12 @@ export function TaskTile({ tasks, today, busy, onAdd, onPatch, onRemove, onFocus
       {isAdding(mode)
         ? (
           <FieldForm
-            fields={newTaskFields(today)}
-            validate={taskFormProblem}
-            submitLabel="新建"
+            fields={newTaskFields(today, t)}
+            validate={payload => taskFormProblem(payload, t)}
+            submitLabel={t('tile.newEntry')}
             busy={busy}
             onSubmit={(payload) => {
-              onAdd(taskInput(payload))
+              onAdd(taskInput(payload, t))
               dispatch({ kind: 'close' })
             }}
             onCancel={() => dispatch({ kind: 'close' })}

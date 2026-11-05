@@ -6,8 +6,10 @@
  * level, and the count keeps a decimal when it needs one.
  */
 import type { JSX } from 'react'
+import { useCopy, type Copy } from '../copy/index.tsx'
 import type { Cell } from '../types.ts'
 import { fractionText, percentOf } from './format.ts'
+import { cellLabel } from './names.ts'
 
 /** Props for the chip. */
 export interface ChipProps {
@@ -16,15 +18,16 @@ export interface ChipProps {
 }
 
 /** What one cell reads as in its tooltip. */
-function describe(cell: Cell): string {
+function describe(cell: Cell, copy: Copy): string {
   const percent = percentOf(cell.value)
-  if (percent <= 0) return '未完成'
-  if (percent >= 100) return '已完成'
-  return `进行中 ${percent}%`
+  if (percent <= 0) return copy('chip.missing')
+  if (percent >= 100) return copy('chip.done')
+  return copy('chip.progress', { percent })
 }
 
 /** Render the chip. */
 export function Chip({ cells, progress }: ChipProps): JSX.Element {
+  const t = useCopy()
   return (
     <div className="pt-chip">
       <div className="pt-marks">
@@ -34,7 +37,10 @@ export function Chip({ cells, progress }: ChipProps): JSX.Element {
             <span
               key={cell.id}
               className={percent >= 100 ? 'pt-mark pt-mark-on' : 'pt-mark'}
-              title={`${cell.label}：${describe(cell)}`}
+              title={t('chip.cell', {
+                label: cell.label ?? cellLabel(cell.id, t),
+                state: describe(cell, t),
+              })}
             >
               <span className="pt-mark-fill" style={{ width: `${percent}%` }} />
             </span>

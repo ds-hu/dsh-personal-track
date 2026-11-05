@@ -21,8 +21,6 @@ const STREAK_SCAN_DAYS = 400
 /** One habit's record across the range. */
 export interface HabitStats {
   readonly id: HabitId
-  /** The habit's display name — the same string the completion bar uses. */
-  readonly label: string
   readonly met: number
   readonly days: number
   readonly ratio: number
@@ -206,7 +204,6 @@ export function buildStats(
     const metDays = perDay.filter(Boolean).length
     return {
       id: habit.id,
-      label: habit.label,
       met: metDays,
       days: keys.length,
       ratio: keys.length === 0 ? 0 : metDays / keys.length,

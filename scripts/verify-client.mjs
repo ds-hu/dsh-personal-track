@@ -53,17 +53,46 @@ const exports_ = loaded.factory(require)
 
 assert.equal(typeof exports_.apply, 'function', 'the client half exports apply')
 
-// One service: the panel and its sidebar entry are both slot registrations, so
-// the two shells this plugin used to reach into are down to one.
-assert.deepEqual(exports_.inject, ['slots'], 'client half injects exactly the services it touches')
+// Two services: the slot registrations, and the shell's language service, which
+// owns the dictionaries and the active language. Both are declared here because
+// cordis resolves a context property only when the plugin declared it.
+assert.deepEqual(exports_.inject, ['slots', 'locale'], 'client half injects exactly the services it touches')
 
 const seen = { slotRegistrations: [], effects: 0 }
+
+/** What the plugin registered with the locale service, by namespace. */
+const dictionaries = new Map()
+
+// The locale fake behaves like the real one where it matters: a bound `t` reads
+// the *active* dictionary at call time, and interpolation fills `{name}`.
+const locale = {
+  register(namespace, dicts) {
+    dictionaries.set(namespace, dicts)
+    return () => {}
+  },
+  bind(namespace) {
+    return (key, params) => {
+      let text = dictionaries.get(namespace)?.zh?.[key] ?? key
+      if (params !== undefined) {
+        for (const [name, value] of Object.entries(params)) text = text.replace(`{${name}}`, String(value))
+      }
+      return text
+    }
+  },
+  getLocale() {
+    return { active: 'zh' }
+  },
+  subscribe() {
+    return () => {}
+  },
+}
 
 const ctx = {
   effect(fn) {
     seen.effects += 1
     return fn() ?? (() => {})
   },
+  locale,
   slots: {
     inject(_name, callback) {
       callback()
@@ -89,8 +118,21 @@ const guardedCtx = new Proxy(ctx, {
 
 exports_.apply(guardedCtx)
 
-assert.equal(seen.effects, 2, 'apply registers two effects (the panel and the sidebar entry)')
+assert.equal(seen.effects, 3, 'apply registers three effects (dictionaries, panel, sidebar entry)')
 assert.equal(appended.length, 1, 'apply injects the stylesheet exactly once')
+
+// The two dictionaries travel together, and they name the same keys: a
+// namespace's texts have one owner, and a language missing a key would read as
+// the key itself on screen.
+const dicts = dictionaries.get('personal-track')
+assert.ok(dicts !== undefined, 'apply registers the personal-track namespace')
+assert.deepEqual(
+  Object.keys(dicts.zh).sort(),
+  Object.keys(dicts.en).sort(),
+  'the Chinese and English dictionaries cover the same keys',
+)
+assert.ok(Object.keys(dicts.zh).length > 300, 'the dictionary is the panel’s copy, not a placeholder set')
+assert.equal(dicts.en['panel.title'], 'Habit board')
 
 const registrationFor = name => seen.slotRegistrations.find(entry => entry.spec.name === name)
 
@@ -117,6 +159,10 @@ for (const method of [
 // The one method that is not a request: it builds the URL an `<img>` points at.
 assert.equal(typeof face.client.assetUrl('abc'), 'string', 'assetUrl builds a URL')
 assert.match(face.client.assetUrl('abc'), /\/habit\/api\/asset\?id=abc$/, 'assetUrl addresses the asset route')
+
+// The panel is handed the language service itself: it cannot subscribe to a
+// language switch through `client`, so the service has to reach the component.
+assert.equal(face.locale, locale, 'the panel receives the locale service')
 
 const panellist = registrationFor('sidebar.panellist')
 assert.ok(panellist, 'a sidebar panel entry is registered')
@@ -374,6 +420,43 @@ for (const name of localeFiles) {
   assert.equal(typeof meta?.description, 'string', `${name} declares meta.description`)
   assert.ok(meta.title.trim() !== '' && meta.description.trim() !== '', `${name} carries non-empty text`)
 }
+
+// One dictionary owns every word the panel says. The check is a source walk
+// rather than a bundle scan: the bundle inlines the table too, so only the
+// source can tell "this file says Chinese" from "this file says a key".
+//
+// Comments are stripped first — the codebase documents itself in Chinese terms
+// (打卡, 达标) on purpose — and the table is the one file allowed to hold Han.
+const HAN = /[\u4e00-\u9fff]/u
+
+/** Every TypeScript source of the browser half. */
+function clientSources(directory) {
+  const found = []
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = resolve(directory, entry.name)
+    if (entry.isDirectory()) found.push(...clientSources(path))
+    else if (['.ts', '.tsx'].includes(extname(entry.name))) found.push(path)
+  }
+  return found
+}
+
+const sources = clientSources('src/client')
+assert.ok(sources.length > 20, 'the source walk found the browser half')
+let guarded = 0
+for (const file of sources) {
+  const source = readFileSync(file, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^[ \t]*\/\/.*$/gm, '')
+  // Normalized, because `resolve` answers with the platform's separators.
+  const normalized = file.replace(/\\/g, '/')
+  if (normalized.endsWith('copy/table.ts')) {
+    assert.match(source, HAN, 'the table is where the Chinese lives')
+    continue
+  }
+  assert.doesNotMatch(source, HAN, `${file} says something the dictionary does not own`)
+  guarded += 1
+}
+assert.ok(guarded > 20, 'every client source but the table was checked')
 
 console.log('client bundle ✓  wrapper, exports, panel registration, injection face and styles verified')
 console.log(

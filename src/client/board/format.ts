@@ -7,16 +7,31 @@
  * `src/shared/habit-day.ts`, the one copy both halves use, so the board cannot
  * disagree with the host about which day it is
  * (docs/adr/0005-shared-habit-day.md).
+ *
+ * Anything a reader sees as *words* takes the panel's `t` ({@link Copy}); the
+ * figures do not. That split is what keeps a date readable in both languages
+ * without a second formatting module: `Intl` takes a tag, and the tag rides on
+ * `t`.
  */
 import { daysBetween, shiftDayKey } from '../../shared/habit-day.ts'
+import type { RopeDuration } from '../../shared/rope.ts'
+import type { Copy } from '../copy/index.tsx'
+import { COPY, type CopyKey } from '../copy/table.ts'
 import type { FieldSpec } from './fields.tsx'
+import { habitLabel } from './names.ts'
+
+/** The `Intl` tag for the panel's active language. */
+export function tagOf(copy: Copy): string {
+  return copy.language === 'zh' ? 'zh-CN' : copy.language === 'en' ? 'en-US' : copy.language
+}
 
 /** `09:41` in the browser's local zone, or an em dash when unset. */
 export function timeOf(instant: string | null | undefined): string {
   if (instant === null || instant === undefined || instant === '') return '——'
   const date = new Date(instant)
   if (Number.isNaN(date.getTime())) return '——'
-  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 /**
@@ -33,9 +48,6 @@ export function timeValueOf(instant: string | null | undefined): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
-/** A standard time input, described once for every editable entry. */
-export const TIME_FIELD = { name: 'time', label: '时间', kind: 'time' } as const
-
 /** The browser's clock as `HH:mm`. */
 export function clockTimeOf(): string {
   const now = new Date()
@@ -44,32 +56,41 @@ export function clockTimeOf(): string {
 }
 
 /**
- * The time field with the current clock time filled in.
+ * The standard time field, labelled in the panel's language and filled with the
+ * current clock time.
  *
  * A new entry is normally recorded at the moment it happened, so "now" is the
  * value worth showing — and it is the instant the host would stamp anyway.
  * Call this while rendering: a module-level constant would freeze at import,
  * and `initial` still wins whenever an existing entry is being edited.
  */
-export function timeField(): FieldSpec {
-  return { ...TIME_FIELD, defaultValue: clockTimeOf() }
+export function timeField(copy: Copy): FieldSpec {
+  return { name: 'time', label: copy('field.time'), kind: 'time', defaultValue: clockTimeOf() }
 }
 
-/** `9月16日` for a habit-day key. */
-export function monthDayOf(key: string): string {
-  const [, month, day] = key.split('-')
-  return `${Number(month)}月${Number(day)}日`
+/** `9月16日` / `Sep 16` for a habit-day key. */
+export function monthDayOf(key: string, copy: Copy): string {
+  const [year, month, day] = key.split('-').map(Number)
+  return new Date(Date.UTC(year!, month! - 1, day!, 12))
+    .toLocaleDateString(tagOf(copy), { month: 'short', day: 'numeric', timeZone: 'UTC' })
 }
 
-/** `周三` for a habit-day key (computed in UTC, so it cannot drift). */
-export function weekdayOf(key: string): string {
-  return new Date(`${key}T12:00:00Z`).toLocaleDateString('zh-CN', { weekday: 'short', timeZone: 'UTC' })
+/** `周三` / `Wed` for a habit-day key (computed in UTC, so it cannot drift). */
+export function weekdayOf(key: string, copy: Copy): string {
+  return new Date(`${key}T12:00:00Z`)
+    .toLocaleDateString(tagOf(copy), { weekday: 'short', timeZone: 'UTC' })
+}
+
+/** The weekday of an arbitrary instant, in the panel's language. */
+export function weekdayNameOf(at: Date, copy: Copy): string {
+  return at.toLocaleDateString(tagOf(copy), { weekday: 'short' })
 }
 
 /** The date chip's text, marking the night tail the way the domain names it. */
-export function dayLabelOf(key: string, night: boolean): string {
-  const weekday = weekdayOf(key)
-  return `${monthDayOf(key)} ${night ? `${weekday}夜` : weekday}`
+export function dayLabelOf(key: string, night: boolean, copy: Copy): string {
+  const monthDay = monthDayOf(key, copy)
+  const weekday = weekdayOf(key, copy)
+  return night ? `${monthDay} ${copy('date.night', { weekday })}` : `${monthDay} ${weekday}`
 }
 
 /** `¥12.5` — the currency symbol plus a trimmed amount. */
@@ -137,8 +158,9 @@ export function percentOf(ratio: number): number {
 }
 
 /** Display text for a media status. */
-export function mediaStatusLabel(status: string): string {
-  return { active: '在列', done: '完成', dropped: '弃' }[status] ?? status
+export function mediaStatusLabel(status: string, copy: Copy): string {
+  const key = `media.status.${status}` as CopyKey
+  return key in COPY ? copy(key) : status
 }
 
 /** A checkpoint as the editor's textarea writes it. */
@@ -163,7 +185,7 @@ export function formatCheckpoints(checkpoints: readonly CheckpointLine[]): strin
  * itself contain `@`, so the *last* one separates; the position is a positive
  * whole number in the task's counting unit. Blank lines are left alone.
  */
-export function parseCheckpoints(text: string): { list: CheckpointLine[]; problem?: string } {
+export function parseCheckpoints(text: string, copy: Copy): { list: CheckpointLine[]; problem?: string } {
   const list: CheckpointLine[] = []
   const lines = text.split('\n')
   for (let index = 0; index < lines.length; index += 1) {
@@ -171,12 +193,12 @@ export function parseCheckpoints(text: string): { list: CheckpointLine[]; proble
     if (line === '') continue
     const separator = line.lastIndexOf('@')
     if (separator <= 0 || separator === line.length - 1) {
-      return { list, problem: `检查点第 ${index + 1} 行要形如「第一章@10」` }
+      return { list, problem: copy('checkpoint.problem', { line: index + 1 }) }
     }
     const label = line.slice(0, separator).trim()
     const at = Number(line.slice(separator + 1).trim())
     if (label === '' || !Number.isInteger(at) || at <= 0) {
-      return { list, problem: `检查点第 ${index + 1} 行要形如「第一章@10」` }
+      return { list, problem: copy('checkpoint.problem', { line: index + 1 }) }
     }
     list.push({ label, at })
   }
@@ -187,17 +209,36 @@ export function parseCheckpoints(text: string): { list: CheckpointLine[]; proble
  * Human text for whatever a handler threw.
  *
  * One translation for every surface that reports a failure, so a host code is
- * always shown the same way instead of by whichever component caught it.
+ * always shown the same way instead of by whichever component caught it. The
+ * host sends a **code** and whatever figures the sentence needs
+ * (`AppError.params`); the sentence itself is the panel's, which is the only
+ * half that knows what language the reader is in. A code this build does not
+ * know falls back to the host's own words with the code beside them, so a newer
+ * host degrades to something readable instead of to a bare key.
  */
-export function messageOf(cause: unknown): string {
+export function messageOf(cause: unknown, copy: Copy): string {
   if (cause instanceof Error && 'code' in cause && typeof cause.code === 'string') {
-    return `${cause.message}（${cause.code}）`
+    const key = `error.${cause.code}` as CopyKey
+    const params = 'params' in cause && typeof cause.params === 'object' && cause.params !== null
+      ? { ...cause.params as Record<string, string | number> }
+      : undefined
+    // A `habit` parameter is an id the host named, so it is translated here:
+    // the sentence is the panel's, and so is every name in it.
+    if (params !== undefined && typeof params.habit === 'string') params.habit = habitLabel(params.habit, copy)
+    if (key in COPY) return copy(key, params)
+    return copy('error.withCode', { message: cause.message, code: cause.code })
   }
   return cause instanceof Error ? cause.message : String(cause)
 }
 
-/** Pace in minutes per kilometre; undefined when it cannot be computed. */
-export function paceOf(minutes: number, distanceKm: number): number | undefined {
+/** A duration in the panel's own words: seconds below a minute, else minutes. */
+export function durationText(duration: RopeDuration, copy: Copy): string {
+  return duration.unit === 'seconds'
+    ? copy('unit.seconds', { seconds: duration.value })
+    : copy('unit.minutes', { minutes: duration.value })
+}
+
+/** Pace in minutes per kilometre; undefined when it cannot be computed. */export function paceOf(minutes: number, distanceKm: number): number | undefined {
   if (!(minutes > 0) || !(distanceKm > 0)) return undefined
   return minutes / distanceKm
 }

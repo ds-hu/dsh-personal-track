@@ -14,6 +14,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react'
 import type { HabitClient } from '../api.ts'
 import { recentFocus } from '../../shared/focus-session.ts'
+import { CopyProvider, useCopy } from '../copy/index.tsx'
+import type { CopyKey } from '../copy/table.ts'
+import type { LocaleService } from '../locale.ts'
 import type { ClockView, StateView } from '../types.ts'
 import { BoardBody } from './BoardBody.tsx'
 import { FocusColumn } from './FocusColumn.tsx'
@@ -32,18 +35,25 @@ import { Pills } from './tile.tsx'
 /** The two views inside the panel. */
 type ViewKey = 'board' | 'stats'
 
-const VIEWS: readonly { readonly value: ViewKey; readonly label: string }[] = [
-  { value: 'board', label: '打卡' },
-  { value: 'stats', label: '统计' },
+const VIEWS: readonly { readonly value: ViewKey; readonly label: CopyKey }[] = [
+  { value: 'board', label: 'panel.view.board' },
+  { value: 'stats', label: 'panel.view.stats' },
 ]
 
 /** Props handed in by the slot registration's injection face. */
 export interface TrackPanelProps {
   readonly client: HabitClient
+  readonly locale: LocaleService
+}
+
+/** The panel's root: it owns the language subscription for everything below. */
+export function TrackPanel({ client, locale }: TrackPanelProps): JSX.Element {
+  return <CopyProvider locale={locale}><Panel client={client} /></CopyProvider>
 }
 
 /** Render the panel. */
-export function TrackPanel({ client }: TrackPanelProps): JSX.Element {
+function Panel({ client }: { readonly client: HabitClient }): JSX.Element {
+  const t = useCopy()
   const [view, setView] = useState<ViewKey>('board')
   const [snapshot, setSnapshot] = useState<StateView | null>(null)
   const [clock, setClock] = useState<ClockView | null>(null)
@@ -65,9 +75,9 @@ export function TrackPanel({ client }: TrackPanelProps): JSX.Element {
       setSnapshot(nextState)
       setError(null)
     } catch (cause) {
-      if (seq === reads.current) setError(messageOf(cause))
+      if (seq === reads.current) setError(messageOf(cause, t))
     }
-  }, [client])
+  }, [client, t])
 
   useEffect(() => {
     void refresh()
@@ -139,12 +149,13 @@ export function TrackPanel({ client }: TrackPanelProps): JSX.Element {
   const focusedEntry = entryFor(focused)
   const overdue = snapshot === null ? 0 : snapshot.tasks.filter(task => task.overdue).length
   const remaining = snapshot === null ? 0 : snapshot.tasks.filter(task => task.state !== 'done').length
+  const views = useMemo(() => VIEWS.map(({ value, label }) => ({ value, label: t(label) })), [t])
 
   return (
     <div className="pt-track">
       <header className="pt-track-head">
-        <h2>习惯看板</h2>
-        <Pills value={view} options={VIEWS} onChange={setView} />
+        <h2>{t('panel.title')}</h2>
+        <Pills value={view} options={views} onChange={setView} />
       </header>
 
       {error === null ? null : <div className="pt-error">{error}</div>}

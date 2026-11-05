@@ -279,9 +279,9 @@ export const handlers: Record<RouteName, RouteHandler> = {
     const range = ctx.parse(z.object({ from: DATE.optional(), to: DATE.optional() }), query, 'stats range')
     const to = range.to ?? ctx.today()
     const from = range.from ?? to
-    if (from > to) throw new ApiError(400, 'habit/bad-request', 'from 必须不晚于 to')
+    if (from > to) throw new ApiError(400, 'habit/bad-request', 'from must not be later than to')
     if (dayKeySpan(from, to, 401) > 400) {
-      throw new ApiError(400, 'habit/range-too-large', '统计范围最多 400 天')
+      throw new ApiError(400, 'habit/range-too-large', 'a statistics range covers at most 400 days', { days: 400 })
     }
     return { ok: true, ...buildStats(ctx.store, from, to, ctx.boundary) }
   },

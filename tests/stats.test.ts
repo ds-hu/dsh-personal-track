@@ -94,7 +94,7 @@ await checkAsync('training fills one 健身 cell and free sessions are aggregate
 
   const stats = buildStats(api.store, WED, THU, boundaryOf(api.config))
   const sport = stats.habits.find(habit => habit.id === 'sport')!
-  assert.equal(sport.label, '健身')
+  assert.equal(sport.id, 'sport', 'a habit crosses the wire as an id, never as a name')
   assert.deepEqual(sport.perDay, [true, true], 'a free session trains the day as a set does')
   assert.equal(sport.met, 2)
   assert.deepEqual(stats.free, { sessions: 2, minutes: 75, kcal: 400, kcalSessions: 1 })

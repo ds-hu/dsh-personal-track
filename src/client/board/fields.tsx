@@ -7,6 +7,7 @@
  * weight), so one form serves every habit kind instead of six near-copies.
  */
 import { useState, type JSX } from 'react'
+import { useCopy, type Copy } from '../copy/index.tsx'
 import { initialValuesOf } from './form-values.ts'
 
 /** One input in a compact form. */
@@ -33,22 +34,23 @@ export interface FieldSpec {
 function payloadOf(
   fields: readonly FieldSpec[],
   values: Readonly<Record<string, string>>,
+  t: Copy,
 ): { payload: Record<string, unknown>; problem?: string } {
   const payload: Record<string, unknown> = {}
   for (const field of fields) {
     const raw = (values[field.name] ?? '').trim()
     if (raw === '') {
       if (field.optional === true) continue
-      return { payload, problem: `${field.label}不能为空` }
+      return { payload, problem: t('field.required', { label: field.label }) }
     }
     if (field.kind === 'number' || (field.kind === 'select' && field.numericOptions === true)) {
       const parsed = Number(raw)
-      if (!Number.isFinite(parsed)) return { payload, problem: `${field.label}必须是数字` }
+      if (!Number.isFinite(parsed)) return { payload, problem: t('field.number', { label: field.label }) }
       if (field.min !== undefined && parsed < field.min) {
-        return { payload, problem: `${field.label}不能小于 ${field.min}` }
+        return { payload, problem: t('field.min', { label: field.label, min: field.min }) }
       }
       if (field.max !== undefined && parsed > field.max) {
-        return { payload, problem: `${field.label}不能大于 ${field.max}` }
+        return { payload, problem: t('field.max', { label: field.label, max: field.max }) }
       }
       payload[field.name] = parsed
     } else {
@@ -79,6 +81,7 @@ export interface FieldFormProps {
 export function FieldForm({
   fields, initial, submitLabel, busy, onSubmit, onCancel, validate,
 }: FieldFormProps): JSX.Element {
+  const t = useCopy()
   // `initial` fills a field being edited; the field's own `defaultValue` is what
   // a new entry starts with. The rule lives in `form-values.ts` because "an empty
   // string is not a value" is subtle enough to have been got wrong here.
@@ -86,7 +89,7 @@ export function FieldForm({
   const [problem, setProblem] = useState<string | null>(null)
 
   const submit = (): void => {
-    const { payload, problem: issue } = payloadOf(fields, values)
+    const { payload, problem: issue } = payloadOf(fields, values, t)
     if (issue !== undefined) {
       setProblem(issue)
       return
@@ -154,7 +157,7 @@ export function FieldForm({
       ))}
       <div className="pt-form-actions">
         <button className="pt-btn pt-btn-primary" disabled={busy} onClick={submit}>{submitLabel}</button>
-        {onCancel === undefined ? null : <button className="pt-btn" onClick={onCancel}>取消</button>}
+        {onCancel === undefined ? null : <button className="pt-btn" onClick={onCancel}>{t('form.cancel')}</button>}
       </div>
       {problem === null ? null : <div className="pt-error">{problem}</div>}
     </div>

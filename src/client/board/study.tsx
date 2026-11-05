@@ -4,22 +4,27 @@
  */
 import { useState, type JSX } from 'react'
 import type { Lesson, VocabProgress, VocabSession } from '../types.ts'
+import { useCopy, type Copy } from '../copy/index.tsx'
 import { FieldForm, type FieldSpec } from './fields.tsx'
 import { percentOf, timeOf } from './format.ts'
 import { SessionList, SessionTile, type SessionEntry } from './session-cards.tsx'
 import { IconButton, Tile, TileHead } from './tile.tsx'
 
 /** Metrics one vocabulary session carries (the list adds the time field). */
-const VOCAB_FIELDS: readonly FieldSpec[] = [
-  { name: 'new', label: '新词', kind: 'number', min: 0 },
-  { name: 'review', label: '复习', kind: 'number', min: 0 },
-  { name: 'minutes', label: '用时(分)', kind: 'number', min: 0 },
-]
+function vocabFields(t: Copy): readonly FieldSpec[] {
+  return [
+    { name: 'new', label: t('field.newWords'), kind: 'number', min: 0 },
+    { name: 'review', label: t('field.review'), kind: 'number', min: 0 },
+    { name: 'minutes', label: t('field.minutesUsed'), kind: 'number', min: 0 },
+  ]
+}
 
 /** Metrics one lesson carries. */
-const LESSON_FIELDS: readonly FieldSpec[] = [
-  { name: 'minutes', label: '用时(分)', kind: 'number', min: 0 },
-]
+function lessonFields(t: Copy): readonly FieldSpec[] {
+  return [
+    { name: 'minutes', label: t('field.minutesUsed'), kind: 'number', min: 0 },
+  ]
+}
 
 /** Props for the vocabulary tile. */
 export interface VocabCardProps {
@@ -44,6 +49,7 @@ export interface VocabCardProps {
 export function VocabCard({
   target, progress, sessions, busy, onTarget, onAdd, onPatch, onRemove,
 }: VocabCardProps): JSX.Element {
+  const t = useCopy()
   const [editing, setEditing] = useState(false)
   const surplus = progress.surplusNew + progress.surplusReview
   const percent = percentOf(progress.ratio)
@@ -51,18 +57,18 @@ export function VocabCard({
   return (
     <Tile span={2} tone={progress.met ? 'done' : 'idle'}>
       <TileHead
-        title="背单词"
+        title={t('habit.vocab')}
         meta={`${percent}%`}
-        metaTitle="复习词按新词的 1/5 计入进度"
+        metaTitle={t('study.vocab.weighting')}
       >
-        <IconButton label="改这一天的目标" disabled={busy} onClick={() => setEditing(value => !value)}>✎</IconButton>
+        <IconButton label={t('study.vocab.editTarget')} disabled={busy} onClick={() => setEditing(value => !value)}>✎</IconButton>
       </TileHead>
 
       <div className="pt-metrics">
-        <span>新 {progress.doneNew}<small>/{progress.targetNew}</small></span>
-        <span>复 {progress.doneReview}<small>/{progress.targetReview}</small></span>
-        <span>{progress.minutes} 分</span>
-        {surplus === 0 ? null : <span className="pt-muted">超额 {surplus}</span>}
+        <span>{t('study.vocab.new', { done: progress.doneNew })}<small>/{progress.targetNew}</small></span>
+        <span>{t('study.vocab.review', { done: progress.doneReview })}<small>/{progress.targetReview}</small></span>
+        <span>{t('unit.minutes', { minutes: progress.minutes })}</span>
+        {surplus === 0 ? null : <span className="pt-muted">{t('study.vocab.surplus', { surplus })}</span>}
       </div>
       <div className="pt-bar">
         <div className="pt-bar-fill" style={{ width: `${percent}%` }} />
@@ -71,10 +77,10 @@ export function VocabCard({
       {editing ? (
         <FieldForm
           fields={[
-            { name: 'new', label: '新词目标', kind: 'number', min: 0, defaultValue: String(target.new) },
-            { name: 'review', label: '复习目标', kind: 'number', min: 0, defaultValue: String(target.review) },
+            { name: 'new', label: t('study.vocab.targetNew'), kind: 'number', min: 0, defaultValue: String(target.new) },
+            { name: 'review', label: t('study.vocab.targetReview'), kind: 'number', min: 0, defaultValue: String(target.review) },
           ]}
-          submitLabel="保存目标"
+          submitLabel={t('study.vocab.saveTarget')}
           busy={busy}
           onSubmit={(payload) => {
             onTarget({ new: Number(payload.new), review: Number(payload.review) })
@@ -85,12 +91,17 @@ export function VocabCard({
       ) : null}
 
       <SessionList
-        title="学习记录"
+        title={t('study.log')}
         entries={sessions as readonly SessionEntry[]}
-        fields={VOCAB_FIELDS}
-        summarize={entry => `${timeOf(String(entry.at ?? ''))} · 新 ${Number(entry.new)} 复 ${Number(entry.review)} · ${Number(entry.minutes)}分`}
+        fields={vocabFields(t)}
+        summarize={entry => t('study.vocab.summary', {
+          time: timeOf(String(entry.at ?? '')),
+          new: Number(entry.new),
+          review: Number(entry.review),
+          minutes: Number(entry.minutes),
+        })}
         busy={busy}
-        addLabel="加一次"
+        addLabel={t('tile.addSession')}
         onAdd={onAdd}
         onPatch={onPatch}
         onRemove={onRemove}
@@ -110,16 +121,22 @@ export interface DuolingoCardProps {
 
 /** Duolingo: any number of lessons a day; one is enough for the cell. */
 export function DuolingoCard({ lessons, busy, onAdd, onPatch, onRemove }: DuolingoCardProps): JSX.Element {
+  const t = useCopy()
   const total = lessons.reduce((sum, lesson) => sum + lesson.minutes, 0)
   return (
     <SessionTile
-      label={`多邻国${lessons.length === 0 ? '' : ` · ${lessons.length} 节 ${total}分`}`}
-      title="学习记录"
+      label={lessons.length === 0
+        ? t('habit.duolingo')
+        : t('study.duolingo.label', { lessons: lessons.length, minutes: total })}
+      title={t('study.log')}
       entries={lessons as readonly SessionEntry[]}
-      fields={LESSON_FIELDS}
-      summarize={entry => `${timeOf(String(entry.at ?? ''))} · ${Number(entry.minutes)} 分钟`}
+      fields={lessonFields(t)}
+      summarize={entry => t('study.lesson.summary', {
+        time: timeOf(String(entry.at ?? '')),
+        minutes: Number(entry.minutes),
+      })}
       busy={busy}
-      addLabel="加一节"
+      addLabel={t('study.addLesson')}
       onAdd={onAdd}
       onPatch={onPatch}
       onRemove={onRemove}

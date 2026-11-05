@@ -12,6 +12,7 @@
  * `KvTable` has six methods, and `store.ts`/`backup.ts` use exactly those six.
  */
 import { strict as assert } from 'node:assert'
+import { EN, ZH, type CopyKey } from '../src/client/copy/table.ts'
 import type { ImportMode } from '../src/host/backup.ts'
 import { type Backup, createBackup } from '../src/host/backup.ts'
 import { boundaryOf, clockOf, type Config } from '../src/host/config.ts'
@@ -337,4 +338,32 @@ export function createChecker(heading: string): Checker {
       if (failed.length > 0) process.exitCode = 1
     },
   }
+}
+
+/** A translate function over one dictionary, with the service's interpolation. */
+export interface TestCopy {
+  (key: CopyKey, params?: Record<string, string | number>): string
+  readonly language: string
+}
+
+/**
+ * `t`, for a test.
+ *
+ * The shell interpolates `{name}` placeholders; this does the same over the
+ * panel's own table, so a test can assert what a reader sees without standing up
+ * the locale service (which lives in the browser). It reads the real
+ * dictionaries — a hand-written fixture would stop noticing the day a row
+ * changed.
+ *
+ * @param language - which dictionary to say things in.
+ */
+export function copyFor(language: 'zh' | 'en'): TestCopy {
+  const dictionary = language === 'zh' ? ZH : EN
+  const translate = (key: CopyKey, params?: Record<string, string | number>): string => {
+    const template = dictionary[key]
+    if (params === undefined) return template
+    return template.replace(/\{(\w+)\}/g, (whole, name: string) =>
+      (name in params ? String(params[name]) : whole))
+  }
+  return Object.assign(translate, { language })
 }

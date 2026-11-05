@@ -8,7 +8,7 @@
 | # | 事项 | 状态 |
 |---|---|---|
 | 1 | README 重写 + badge/截图 + 中文版 + `AGENTS.md` | ⬜ |
-| 2 | i18n 完善 | ⬜ |
+| 2 | i18n 完善 | ✅ 本轮 |
 | 3 | 跳绳：去掉强制 90/180 定数，向跑步看齐 | ✅ |
 | 4 | 跑步：曲线按里程聚类分色，Pareto Frontier 虚线 | ✅ 本轮 |
 | 5 | 报告复制：补 DDL 与当日及以后截止的已完成任务 | ✅ |
@@ -162,7 +162,6 @@
   exit 1 失败；恢复后两文件 sha256 与注入前一致。
 
 ## 第 3 轮结果（4）
-
 - **分档**：`run-curve.ts` 的 `clusterKey` = `max(1, round(km))`；`clusterRuns` 按档升序返回，
   档内按配速（同速按日期）排序，并附上该档的前沿。
 - **前沿**：`paretoFrontier` 先按配速去重（留低心率），再一趟扫描留心率严格下降的点，
@@ -187,3 +186,28 @@
   「蓝 → 青 → 绿 → 橄榄 → 琥珀」五色（深浅主题各一套）。返工后用 `styles.ts` 里的真实样式表
   在本地渲染了两种主题核对，不再用 mock 自带的颜色。
 
+## 第 4 轮结果（2）
+
+- **口径**（用户两个决定）：全量双语（357 条，英文逐条写）；宿主那半边**全部改成错误码 + 客户端翻译**。
+- **字典**：`src/client/copy/table.ts` 一张表，一行 = 一个键 + `{ zh, en }`，两本词典由
+  `dictionaryOf()` 投影。所以「两套键集合相同」是形状，不是靠测试盯着；`tests/copy.test.ts`
+  只断言构造看不见的部分：英文里没有残留汉字、两边的占位符**名字与顺序**一致、填完不留花括号。
+- **`t` 的到达方式**：`CopyProvider` + `useCopy()`（context），不是 props——整块面板是一棵树。
+  provider 订阅 `locale.subscribe`：切语言不是重新挂载，不订阅的话每个标签都停在挂载时那门语言。
+  纯模块（报告、格式化）收 `Copy` 参数，测试传 `copyFor('zh' | 'en')`，不需要 React。
+- **`language` 挂在 `t` 上**：`Intl` 要的是 tag 不是句子（`9月16日` vs `Sep 16`），所以
+  `Copy` 是个带 `language` 属性的函数，格式化函数只需一个参数，两个参数不会互相打架。
+- **宿主不说语言**：`habits.ts` 去掉 `label`，wire 上的**格**只带 id（任务格仍带 title，那是内容）；
+  统计行同样只带 id。失败改为 `ApiError(status, code, message, params)`，`params` 只装句子需要的
+  数字/名字，`messageOf` 查 `error.<code>` 并把 `habit` 参数翻成习惯名，未知 code 退回原句 + code。
+- **两处共用模块的修正**：`shared/rope.ts` 的 `ropeDurationText`（返回 `45 秒`）换成
+  `ropeDurationOf`（返回 `{unit, value}`）——共用模块只决定用哪个单位，词归面板；
+  `format.ts` 的 `timeOf` 不再用 `toLocaleTimeString('zh-CN')`，改成手写 pad（与语言无关）。
+- **样式**：`.pt-heat-label` 从 `3.6em` 加到 `6.2em`——"Vocabulary""Breakfast" 是 洗漱/早饭 的两倍宽，
+  内容自适应会让热力网格的行与行错位。
+- **验证**：18/18 测试文件通过（新增 `tests/copy.test.ts`；`client-format` 增加一条英文报告断言，
+  证明同一组数字用两种语言都念得出来）；三套 `tsc` 通过；`build.mjs` + `verify-client` + `verify-host` 通过。
+  源码遍历确认：`src/client` 里除 `copy/table.ts` 之外**没有**汉字字面量（注释先剥掉，共 30 个文件）。
+  注入验证（两次）：往 `Chip.tsx` 塞一个中文 `title` → 守卫 exit 1；从英文词典删掉 `panel.title` →
+  第二条守卫 exit 1（须先 rebuild，守卫读产物）；恢复后 sha256 均与注入前一致。
+- **已知边界**：英文没有复数机制（"1 entries"）；条目多到 6 档以上时曲线会出现相邻两档共色（第 3 轮已说明）。

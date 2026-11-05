@@ -44,16 +44,22 @@ export type HabitId =
   | 'vocab' | 'duolingo'
   | 'sport'
 
-/** One **格**: an id, and the label the bar shows for it. */
+/** One **格**: an id, and the habit it belongs to. */
 export interface HabitCell {
   readonly id: CellId
-  readonly label: string
 }
 
-/** One **习惯**: its id, its label, its form, and the **格** it owns. */
+/**
+ * One **习惯**: its id, its form, and the **格** it owns.
+ *
+ * There is no name here. A name is a language, and this inventory is what the
+ * host owns in common for every language: the panel translates `habit.<id>` and
+ * `cell.<id>` (`src/client/copy/table.ts`), and `tests/habits.test.ts` asserts
+ * that every id below has a row there — so a habit cannot be added on one side
+ * and stay nameless on the other.
+ */
 export interface Habit {
   readonly id: HabitId
-  readonly label: string
   readonly form: HabitForm
   /**
    * How many times a **打卡** may be recorded in one **习惯日**; absent for every
@@ -82,27 +88,22 @@ export interface Habit {
 export const HABITS: readonly Habit[] = [
   {
     id: 'wash',
-    label: '洗漱',
     form: 'check',
     maxPerDay: 2,
-    cells: [
-      { id: 'wash1', label: '洗漱 1' },
-      { id: 'wash2', label: '洗漱 2' },
-    ],
+    cells: [{ id: 'wash1' }, { id: 'wash2' }],
   },
   {
     id: 'shower',
-    label: '洗澡',
     form: 'check',
     maxPerDay: 1,
-    cells: [{ id: 'shower', label: '洗澡' }],
+    cells: [{ id: 'shower' }],
   },
-  { id: 'breakfast', label: '早饭', form: 'slot', cells: [{ id: 'breakfast', label: '早饭' }] },
-  { id: 'lunch', label: '午饭', form: 'slot', cells: [{ id: 'lunch', label: '午饭' }] },
-  { id: 'dinner', label: '晚饭', form: 'slot', cells: [{ id: 'dinner', label: '晚饭' }] },
-  { id: 'vocab', label: '背单词', form: 'session', cells: [{ id: 'vocab', label: '背单词' }] },
-  { id: 'duolingo', label: '多邻国', form: 'session', cells: [{ id: 'duolingo', label: '多邻国' }] },
-  { id: 'sport', label: '健身', form: 'session', cells: [{ id: 'sport', label: '健身' }] },
+  { id: 'breakfast', form: 'slot', cells: [{ id: 'breakfast' }] },
+  { id: 'lunch', form: 'slot', cells: [{ id: 'lunch' }] },
+  { id: 'dinner', form: 'slot', cells: [{ id: 'dinner' }] },
+  { id: 'vocab', form: 'session', cells: [{ id: 'vocab' }] },
+  { id: 'duolingo', form: 'session', cells: [{ id: 'duolingo' }] },
+  { id: 'sport', form: 'session', cells: [{ id: 'sport' }] },
 ]
 
 /** Every **格**, flattened in bar order. */

@@ -4,16 +4,28 @@
  */
 import { useState, type JSX } from 'react'
 import type { MealSlot } from '../api.ts'
+import { useCopy, type Copy } from '../copy/index.tsx'
 import type { DayRecord } from '../types.ts'
 import { FieldForm, type FieldSpec } from './fields.tsx'
-import { timeField, TIME_FIELD, moneyOf, timeOf, timeValueOf } from './format.ts'
+import { moneyOf, timeField, timeOf, timeValueOf } from './format.ts'
+import { habitLabel } from './names.ts'
 import { AddSlot, IconButton, Tile, TileHead, TimeChip, TimeEditor } from './tile.tsx'
 
 /** Fields one meal slot exposes when edited; its own time is always known. */
-const MEAL_EDIT_FIELDS: readonly FieldSpec[] = [
-  TIME_FIELD,
-  { name: 'price', label: '价格', kind: 'number', step: 0.5, min: 0, optional: true, placeholder: '可留空' },
-]
+function mealEditFields(t: Copy): readonly FieldSpec[] {
+  return [
+    timeField(t),
+    {
+      name: 'price',
+      label: t('field.price'),
+      kind: 'number',
+      step: 0.5,
+      min: 0,
+      optional: true,
+      placeholder: t('form.optional'),
+    },
+  ]
+}
 
 /** Props for a counted check tile (washing up twice, showering once). */
 export interface CheckTileProps {
@@ -34,6 +46,7 @@ export interface CheckTileProps {
  * nothing to press once the day is done.
  */
 export function CheckTile({ label, times, max, busy, onCheck, onEdit, onRemove }: CheckTileProps): JSX.Element {
+  const t = useCopy()
   const [editing, setEditing] = useState<number | null>(null)
   const done = times.length >= max
   return (
@@ -50,7 +63,7 @@ export function CheckTile({ label, times, max, busy, onCheck, onEdit, onRemove }
               onRemove={() => onRemove(index)}
             />
           ))}
-          {done ? null : <AddSlot label={`${label}打卡`} disabled={busy} onClick={onCheck} />}
+          {done ? null : <AddSlot label={t('check.mark', { label })} disabled={busy} onClick={onCheck} />}
         </div>
       ) : (
         <TimeEditor
@@ -87,34 +100,35 @@ export interface LaundryTileProps {
  * Nothing left to wash is this tile's own idea of done, so it greens at zero.
  */
 export function LaundryTile({ pending, busy, onDelta, onWash, onSet }: LaundryTileProps): JSX.Element {
+  const t = useCopy()
   const [mode, setMode] = useState<'idle' | 'wash' | 'fix'>('idle')
 
   return (
     <Tile span={2} tone={pending === 0 ? 'done' : 'idle'}>
-      <TileHead title="洗衣" meta={`待洗 ${pending}`}>
-        <IconButton label="加一件脏衣服" disabled={busy} onClick={() => onDelta(1)}>＋</IconButton>
-        <IconButton label="减一件（修正）" disabled={busy || pending <= 0} onClick={() => onDelta(-1)}>−</IconButton>
+      <TileHead title={t('laundry.title')} meta={t('laundry.pending', { count: pending })}>
+        <IconButton label={t('laundry.add')} disabled={busy} onClick={() => onDelta(1)}>＋</IconButton>
+        <IconButton label={t('laundry.remove')} disabled={busy || pending <= 0} onClick={() => onDelta(-1)}>−</IconButton>
       </TileHead>
       {mode === 'idle' ? (
         <div className="pt-tile-foot">
           <span className="pt-big">{pending}</span>
-          <span className="pt-muted">件待洗</span>
+          <span className="pt-muted">{t('laundry.unit')}</span>
           <span className="pt-grow" />
           <button
             type="button"
             className="pt-primary"
             disabled={busy || pending <= 0}
             onClick={() => setMode('wash')}
-          >洗完</button>
-          <button type="button" className="pt-ghost" disabled={busy} onClick={() => setMode('fix')}>修正</button>
+          >{t('laundry.wash')}</button>
+          <button type="button" className="pt-ghost" disabled={busy} onClick={() => setMode('fix')}>{t('laundry.fix')}</button>
         </div>
       ) : mode === 'wash' ? (
         <FieldForm
           fields={[
-            { name: 'pieces', label: '洗了几件', kind: 'number', min: 1, defaultValue: String(pending) },
-            timeField(),
+            { name: 'pieces', label: t('laundry.pieces'), kind: 'number', min: 1, defaultValue: String(pending) },
+            timeField(t),
           ]}
-          submitLabel="记下这次洗涤"
+          submitLabel={t('laundry.commit')}
           busy={busy}
           onSubmit={(payload) => {
             onWash(Number(payload.pieces), typeof payload.time === 'string' ? payload.time : undefined)
@@ -124,8 +138,14 @@ export function LaundryTile({ pending, busy, onDelta, onWash, onSet }: LaundryTi
         />
       ) : (
         <FieldForm
-          fields={[{ name: 'pending', label: '待洗改为', kind: 'number', min: 0, defaultValue: String(pending) }]}
-          submitLabel="修正"
+          fields={[{
+            name: 'pending',
+            label: t('laundry.setPending'),
+            kind: 'number',
+            min: 0,
+            defaultValue: String(pending),
+          }]}
+          submitLabel={t('laundry.fix')}
           busy={busy}
           onSubmit={(payload) => {
             onSet(Number(payload.pending))
@@ -139,11 +159,7 @@ export function LaundryTile({ pending, busy, onDelta, onWash, onSet }: LaundryTi
 }
 
 /** The three meal slots, in the order the board lists them. */
-const MEAL_SLOTS: readonly { readonly slot: MealSlot; readonly label: string }[] = [
-  { slot: 'breakfast', label: '早饭' },
-  { slot: 'lunch', label: '午饭' },
-  { slot: 'dinner', label: '晚饭' },
-]
+const MEAL_SLOTS: readonly MealSlot[] = ['breakfast', 'lunch', 'dinner']
 
 /** Props for the meal board. */
 export interface MealBoardProps {
@@ -155,16 +171,18 @@ export interface MealBoardProps {
 
 /** Three compact rows: tap `＋` to stamp the time now, ✎ to retime or price it. */
 export function MealBoard({ meals, busy, onRecord, onClear }: MealBoardProps): JSX.Element {
+  const t = useCopy()
   const [editing, setEditing] = useState<MealSlot | null>(null)
-  const recorded = MEAL_SLOTS.filter(({ slot }) => meals[slot] !== undefined).length
+  const recorded = MEAL_SLOTS.filter(slot => meals[slot] !== undefined).length
 
   return (
     <Tile span={2} tone={recorded === MEAL_SLOTS.length ? 'done' : 'idle'}>
-      <TileHead title="三餐" meta={`${recorded}/3`} />
+      <TileHead title={t('meal.title')} meta={`${recorded}/3`} />
       {editing === null ? (
         <div className="pt-meals">
-          {MEAL_SLOTS.map(({ slot, label }) => {
+          {MEAL_SLOTS.map((slot) => {
             const meal = meals[slot]
+            const label = habitLabel(slot, t)
             return (
               <div key={slot} className={meal === undefined ? 'pt-meal' : 'pt-meal pt-meal-done'}>
                 <span className="pt-meal-label">{label}</span>
@@ -176,11 +194,11 @@ export function MealBoard({ meals, busy, onRecord, onClear }: MealBoardProps): J
                 )}
                 <span className="pt-meal-actions">
                   {meal === undefined
-                    ? <AddSlot label={`记录${label}`} disabled={busy} onClick={() => onRecord(slot, {})} />
+                    ? <AddSlot label={t('meal.record', { meal: label })} disabled={busy} onClick={() => onRecord(slot, {})} />
                     : (
                       <>
-                        <IconButton label="修改时间与价格" disabled={busy} onClick={() => setEditing(slot)}>✎</IconButton>
-                        <IconButton label="清除这一餐" disabled={busy} onClick={() => onClear(slot)}>×</IconButton>
+                        <IconButton label={t('meal.edit')} disabled={busy} onClick={() => setEditing(slot)}>✎</IconButton>
+                        <IconButton label={t('meal.clear')} disabled={busy} onClick={() => onClear(slot)}>×</IconButton>
                       </>
                     )}
                 </span>
@@ -190,9 +208,9 @@ export function MealBoard({ meals, busy, onRecord, onClear }: MealBoardProps): J
         </div>
       ) : (
         <FieldForm
-          fields={MEAL_EDIT_FIELDS}
+          fields={mealEditFields(t)}
           initial={{ time: timeValueOf(meals[editing]?.at), price: meals[editing]?.price }}
-          submitLabel="保存"
+          submitLabel={t('form.save')}
           busy={busy}
           onSubmit={(payload) => {
             onRecord(editing, {

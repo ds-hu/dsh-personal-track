@@ -14,6 +14,7 @@
  */
 import { useEffect, useState, type JSX } from 'react'
 import { focusSeconds, type Session } from '../../shared/focus-session.ts'
+import { useCopy, type Copy } from '../copy/index.tsx'
 import type { RegistryEntry } from './focus.ts'
 import { formatDuration, nowLabel, sessionStamp } from './focus.ts'
 import { fractionText, mediaStatusLabel } from './format.ts'
@@ -35,10 +36,27 @@ export interface FocusColumnProps {
   readonly onContinue: () => void
 }
 
+/** The one-line state under a recent entry's title. */
+function stateLine(entry: RegistryEntry, today: string, copy: Copy): string {
+  if (!('state' in entry)) {
+    return `${copy(entry.kind === 'film' ? 'focus.kind.film' : 'focus.kind.book')} · ${mediaStatusLabel(entry.status, copy)}`
+  }
+  const progress = entry.progress.total === undefined
+    ? copy(entry.progress.current > 0 ? 'chip.done' : 'chip.missing')
+    : copy('focus.progress', {
+      current: fractionText(entry.progress.current),
+      total: fractionText(entry.progress.total),
+    })
+  if (entry.due === undefined) return progress
+  const due = entry.due === today ? copy('focus.due.today') : copy('focus.due', { date: entry.due.slice(5) })
+  return `${progress} · ${due}`
+}
+
 /** Render the column. */
 export function FocusColumn({
   recent, today, night, progress, remaining, overdue, onContinue,
 }: FocusColumnProps): JSX.Element {
+  const t = useCopy()
   const [now, setNow] = useState(() => new Date())
 
   // Only the empty state needs a moving clock, but the interval is cheap and
@@ -51,29 +69,27 @@ export function FocusColumn({
 
   if (recent !== undefined) {
     const { entry, session } = recent
-    const sub = 'state' in entry
-      ? `${entry.progress.total === undefined
-        ? (entry.progress.current > 0 ? '已完成' : '未完成')
-        : `进度 ${fractionText(entry.progress.current)}/${fractionText(entry.progress.total)}`}${
-        entry.due === undefined ? '' : ` · 截止于${entry.due === today ? '今天' : entry.due.slice(5)}`}`
-      : `${entry.kind === 'film' ? '影' : '书'} · ${mediaStatusLabel(entry.status)}`
+    const sub = stateLine(entry, today, t)
     const classes = 'state' in entry && entry.overdue
       ? 'pt-focus-card pt-focus-card-late'
       : 'pt-focus-card'
     return (
       <aside className="pt-focus-col">
-        <span className="pt-focus-label">专注栏 · 最近专注</span>
+        <span className="pt-focus-label">{t('focus.recent')}</span>
         <div className={classes}>
           <div className="pt-focus-card-head">
             <span className="pt-focus-title">{entry.title}</span>
           </div>
           <span className="pt-focus-sub">{sub}</span>
           <span className="pt-focus-sub">
-            最近一段 {sessionStamp(session.startedAt)} · {formatDuration(focusSeconds([session]))}
+            {t('focus.last', {
+              stamp: sessionStamp(session.startedAt),
+              duration: formatDuration(focusSeconds([session])),
+            })}
           </span>
-          <span className="pt-focus-time">累计专注 {formatDuration(entry.focusSeconds)}</span>
+          <span className="pt-focus-time">{t('focus.total', { duration: formatDuration(entry.focusSeconds) })}</span>
           <div className="pt-focus-actions">
-            <button type="button" className="pt-primary" onClick={onContinue}>继续专注</button>
+            <button type="button" className="pt-primary" onClick={onContinue}>{t('focus.continue')}</button>
           </div>
         </div>
       </aside>
@@ -81,22 +97,21 @@ export function FocusColumn({
   }
 
   const ratio = progress === undefined || progress.total === 0 ? 0 : progress.done / progress.total
-  const [year, month, day] = today.split('-')
   return (
     <aside className="pt-focus-col">
-      <span className="pt-focus-label">专注栏</span>
-      <div className="pt-focus-clock">{nowLabel(now)}</div>
+      <span className="pt-focus-label">{t('focus.column')}</span>
+      <div className="pt-focus-clock">{nowLabel(now, t)}</div>
       <div className="pt-focus-date">
-        {`习惯日 ${year ?? ''}-${month ?? ''}-${day ?? ''}`}
-        {night ? <span className="pt-night-badge">夜</span> : null}
+        {t('habitDay', { date: today })}
+        {night ? <span className="pt-night-badge">{t('focus.night')}</span> : null}
       </div>
       <ProgressRing
         ratio={ratio}
         label={`${fractionText(progress?.done ?? 0)}/${fractionText(progress?.total ?? 0)}`}
-        sub="今日"
+        sub={t('date.today')}
       />
       <span className="pt-focus-todo">
-        剩余任务 <b>{remaining}</b> · 逾期 <b>{overdue}</b>
+        {t('focus.openTasks')} <b>{remaining}</b> · {t('focus.overdueTasks')} <b>{overdue}</b>
       </span>
     </aside>
   )

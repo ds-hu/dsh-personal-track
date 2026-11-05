@@ -13,7 +13,12 @@ import { shiftDayKey, type DayKey } from '../shared/habit-day.ts'
 export interface Cell {
   /** A habit cell id, or `task:<id>` for a task due on this day. */
   readonly id: string
-  readonly label: string
+  /**
+   * Content the host alone knows — a task's title. Absent on a habit cell: the
+   * panel names those from the id, because a name is a language and the host
+   * answers in none (`src/client/copy/table.ts`).
+   */
+  readonly label?: string
   /** Completion as a fraction in `[0,1]`: 0 untouched, 1 complete, between = partial. */
   readonly value: number
 }
@@ -178,9 +183,10 @@ function cellValue(id: CellId, day: DayRecord | undefined, vocab: VocabProgress 
 export function dayCells(day: DayRecord | undefined, dueTasks: readonly DueTask[] = []): Cell[] {
   const vocab = vocabProgress(day)
   return [
+    // A habit cell travels as an id only: the panel owns the name, and a task
+    // cell carries its title because that is content the host alone knows.
     ...HABITS.flatMap(habit => habit.cells.map(cell => ({
       id: cell.id,
-      label: cell.label,
       value: cellValue(cell.id, day, vocab),
     }))),
     ...dueTasks.map(task => ({

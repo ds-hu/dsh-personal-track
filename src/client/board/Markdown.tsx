@@ -6,6 +6,7 @@
  * markup, so nothing a material contains can become HTML.
  */
 import type { JSX, ReactNode } from 'react'
+import { useCopy } from '../copy/index.tsx'
 import { parseMarkdown, type InlineRun, type MdBlock } from './markdown.ts'
 
 /** Render one inline run as an element. */
@@ -49,7 +50,8 @@ function blockNode(block: MdBlock, key: number): ReactNode {
 
 /** Render a material's Markdown. */
 export function Markdown({ source }: { readonly source: string }): JSX.Element {
+  const t = useCopy()
   const blocks = parseMarkdown(source)
-  if (blocks.length === 0) return <span className="pt-muted">（空文本块）</span>
+  if (blocks.length === 0) return <span className="pt-muted">{t('material.empty')}</span>
   return <div className="pt-md">{blocks.map((block, index) => blockNode(block, index))}</div>
 }

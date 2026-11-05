@@ -77,8 +77,23 @@ export function mergeRope(sets: readonly RopeSet[]): RopeDay | null {
   }
 }
 
-/** `45 秒`, `10 分`, `12.5 分` — how the report and the card print a duration. */
-export function ropeDurationText(seconds: number): string {
-  if (seconds < 60) return `${seconds} 秒`
-  return `${Math.round((seconds / 60) * 10) / 10} 分`
+/**
+ * How a duration should read: whole seconds below a minute, otherwise minutes
+ * with at most one decimal.
+ *
+ * The *unit* is a domain decision (a 45-second session is "45 seconds", not
+ * "0.75 minutes"), so it lives here with the arithmetic; the words are the
+ * panel's, because they are translated and this module is shared with the host
+ * (`ropeDurationText` used to return `45 秒` outright, which made the shared
+ * half of the plugin own a language).
+ */
+export interface RopeDuration {
+  readonly unit: 'seconds' | 'minutes'
+  readonly value: number
+}
+
+/** The unit and figure for a duration in seconds. */
+export function ropeDurationOf(seconds: number): RopeDuration {
+  if (seconds < 60) return { unit: 'seconds', value: seconds }
+  return { unit: 'minutes', value: Math.round((seconds / 60) * 10) / 10 }
 }

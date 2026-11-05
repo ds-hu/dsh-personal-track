@@ -19,6 +19,7 @@ import {
   type TaskInput,
   type TaskPatch,
 } from '../api.ts'
+import { useCopy } from '../copy/index.tsx'
 import type { ClockView, StateView, VocabProgress } from '../types.ts'
 import { mergeRope } from '../../shared/rope.ts'
 import { CheckTile, LaundryTile, MealBoard } from './cards.tsx'
@@ -27,6 +28,7 @@ import { DateNav } from './DateNav.tsx'
 import { EquipmentCard, FreeCard, PlankCard, PullupCard, RopeTile, RunTile } from './fitness.tsx'
 import type { RegistryEntry } from './focus.ts'
 import { fractionText, messageOf } from './format.ts'
+import { habitLabel } from './names.ts'
 import { MediaTile, TaskTile } from './registry.tsx'
 import { dayReport } from './report.ts'
 import { DuolingoCard, VocabCard } from './study.tsx'
@@ -107,6 +109,7 @@ export interface BoardBodyProps {
 export function BoardBody({
   client, onShowStats, onOpenFocus, refreshToken, onStateRead,
 }: BoardBodyProps): JSX.Element {
+  const t = useCopy()
   const [clock, setClock] = useState<ClockView | null>(null)
   const [date, setDate] = useState<string | null>(null)
   const [state, setState] = useState<StateView | null>(null)
@@ -126,8 +129,8 @@ export function BoardBody({
   const seenToken = useRef(refreshToken)
 
   const report = useCallback((cause: unknown) => {
-    setError(messageOf(cause))
-  }, [])
+    setError(messageOf(cause, t))
+  }, [t])
 
   /** Adopt one slice: it becomes what is drawn, and the panel hears about it. */
   const adopt = useCallback((next: StateView) => {
@@ -214,7 +217,7 @@ export function BoardBody({
   }, [adopt, report])
 
   if (date === null || clock === null) {
-    return <div className="pt-board"><div className="pt-muted">加载中…</div></div>
+    return <div className="pt-board"><div className="pt-muted">{t('board.loading')}</div></div>
   }
 
   const day = state?.day
@@ -264,7 +267,7 @@ export function BoardBody({
   /** Copy the shown day as plain text, for pasting somewhere else. */
   const copyReport = async (): Promise<void> => {
     if (state === null) return
-    const text = dayReport(state, clock)
+    const text = dayReport(state, clock, t)
     try {
       await navigator.clipboard.writeText(text)
       flashCopied()
@@ -290,20 +293,20 @@ export function BoardBody({
         <ProgressRing
           ratio={day === undefined || day.progress.total === 0 ? 0 : day.progress.done / day.progress.total}
           label={`${fractionText(day?.progress.done ?? 0)}/${day?.progress.total ?? 8}`}
-          sub="今日"
+          sub={t('date.today')}
         />
         {day === undefined ? null : <Chip cells={day.cells} progress={day.progress} />}
         <span className="pt-grow" />
-        <button type="button" className="pt-ghost" onClick={onShowStats} title="切到统计视图">统计</button>
+        <button type="button" className="pt-ghost" onClick={onShowStats} title={t('board.showStats')}>{t('panel.view.stats')}</button>
       </div>
 
       <DateNav date={date} today={clock.today} night={clock.nightTail} onChange={goTo} />
       {error === null ? null : <div className="pt-error">{error}</div>}
 
       <div className="pt-grid">
-        <GroupHeader label="日常" />
+        <GroupHeader label={t('group.daily')} />
         <CheckTile
-          label="洗漱"
+          label={habitLabel('wash', t)}
           times={record?.washes.times ?? []}
           max={2}
           busy={busy}
@@ -312,7 +315,7 @@ export function BoardBody({
           onRemove={index => void act(() => client.uncheck(date, 'wash', index))}
         />
         <CheckTile
-          label="洗澡"
+          label={habitLabel('shower', t)}
           times={record?.shower.at == null ? [] : [record.shower.at]}
           max={1}
           busy={busy}
@@ -328,7 +331,7 @@ export function BoardBody({
           onSet={value => void act(() => client.setStock(value, { date }))}
         />
 
-        <GroupHeader label="饮食" />
+        <GroupHeader label={t('group.diet')} />
         <MealBoard
           meals={record?.meals ?? {}}
           busy={busy}
@@ -336,7 +339,7 @@ export function BoardBody({
           onClear={slot => void act(() => client.clearMeal(date, slot))}
         />
 
-        <GroupHeader label="学习" />
+        <GroupHeader label={t('group.study')} />
         <VocabCard
           target={day?.target ?? clock.config.defaultVocabTarget}
           progress={day?.vocab ?? EMPTY_VOCAB}
@@ -349,7 +352,7 @@ export function BoardBody({
         />
         <DuolingoCard lessons={record?.duolingo ?? []} {...sessionHandlers('duolingo')} />
 
-        <GroupHeader label="健身" />
+        <GroupHeader label={t('group.training')} />
         <RunTile
           run={record?.run ?? null}
           defaultMinutes={clock.config.defaultRunMinutes}
@@ -375,7 +378,7 @@ export function BoardBody({
         <EquipmentCard sessions={record?.equipment ?? []} {...sessionHandlers('equipment')} />
         <FreeCard sessions={record?.free ?? []} {...sessionHandlers('free')} />
 
-        <GroupHeader label="记录" />
+        <GroupHeader label={t('group.records')} />
         <MediaTile
           media={state?.media ?? []}
           busy={busy}
@@ -396,9 +399,9 @@ export function BoardBody({
 
         {record === null ? (
           <Tile span={2}>
-            <TileHead title="这一天还没有记录" />
+            <TileHead title={t('board.empty.title')} />
             <div className="pt-tile-foot">
-              <span className="pt-muted">从上面任意一项开始打卡即可</span>
+              <span className="pt-muted">{t('board.empty.hint')}</span>
             </div>
           </Tile>
         ) : null}
@@ -411,7 +414,7 @@ export function BoardBody({
           className="pt-ghost"
           disabled={state === null}
           onClick={() => void copyReport()}
-        >{copied ? '已复制 ✓' : '复制纯文本报告'}</button>
+        >{copied ? t('board.copied') : t('board.copyReport')}</button>
       </div>
     </div>
   )

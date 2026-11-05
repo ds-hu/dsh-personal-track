@@ -31,12 +31,19 @@ const BASE = API_PREFIX
 export class HabitApiError extends Error {
   readonly status: number
   readonly code: string
+  /**
+   * The figures the code's sentence needs (`{ days: 400 }`), never a sentence:
+   * the panel looks `error.<code>` up in its own dictionary and fills these in,
+   * which is the only way a failure can be read in the reader's language.
+   */
+  readonly params?: Record<string, string | number>
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, params?: Record<string, string | number>) {
     super(message)
     this.name = 'HabitApiError'
     this.status = status
     this.code = code
+    if (params !== undefined) this.params = params
   }
 }
 
@@ -278,7 +285,10 @@ export interface EndFocusOptions {
  * between "restart dsh" and an entry that draws its own images as missing.
  */
 export function staleHostError(): HabitApiError {
-  return new HabitApiError(0, 'habit/stale-host', '插件宿主半身未更新：请重启 dsh --profile web')
+  // Diagnostics, not copy: the panel says this in the reader's language by
+  // looking the `habit/stale-host` code up in its dictionary, and this message
+  // is what a log or a test sees.
+  return new HabitApiError(0, 'habit/stale-host', 'the plugin host half is stale: restart dsh --profile web')
 }
 
 /**
@@ -299,16 +309,17 @@ export function createHabitClient(options: HabitClientOptions = {}): HabitClient
     try {
       response = await doFetch(path, init)
     } catch (cause) {
-      throw new HabitApiError(0, 'habit/unreachable', `无法连接插件服务：${String(cause)}`)
+      throw new HabitApiError(0, 'habit/unreachable', `cannot reach the plugin service: ${String(cause)}`)
     }
     const payload = await response.json().catch(() => null) as
-      | { error?: { code?: string; message?: string } }
+      | { error?: { code?: string; message?: string; params?: Record<string, string | number> } }
       | null
     if (!response.ok) {
       throw new HabitApiError(
         response.status,
         payload?.error?.code ?? 'habit/unknown',
         payload?.error?.message ?? `HTTP ${response.status}`,
+        payload?.error?.params,
       )
     }
     return payload as T

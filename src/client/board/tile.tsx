@@ -8,8 +8,9 @@
  * be clickable as a whole.
  */
 import type { JSX, ReactNode } from 'react'
+import { useCopy } from '../copy/index.tsx'
 import { FieldForm, type FieldSpec } from './fields.tsx'
-import { TIME_FIELD, timeOf, timeValueOf } from './format.ts'
+import { timeField, timeOf, timeValueOf } from './format.ts'
 
 /** How much of the grid row a tile takes. */
 export type Span = 1 | 2
@@ -98,11 +99,12 @@ export function ProgressRing({ ratio, label, sub }: {
   readonly label: string
   readonly sub?: string
 }): JSX.Element {
+  const t = useCopy()
   const radius = 15.5
   const circumference = 2 * Math.PI * radius
   const clamped = Number.isFinite(ratio) ? Math.max(0, Math.min(1, ratio)) : 0
   return (
-    <div className="pt-ring" role="img" aria-label={`完成 ${label}`}>
+    <div className="pt-ring" role="img" aria-label={t('tile.complete', { label })}>
       <svg viewBox="0 0 40 40" width="46" height="46">
         <circle className="pt-ring-track" cx="20" cy="20" r={radius} />
         <circle
@@ -150,19 +152,20 @@ export function TimeChip({ instant, busy, onEdit, onRemove }: {
   readonly onEdit: () => void
   readonly onRemove: () => void
 }): JSX.Element {
+  const t = useCopy()
   return (
     <span className="pt-chip-time">
       <button
         type="button"
         className="pt-chip-time-label"
-        title="修改时间"
+        title={t('tile.editTime')}
         disabled={busy}
         onClick={onEdit}
       >{timeOf(instant)}</button>
       <button
         type="button"
         className="pt-chip-time-remove"
-        title="撤销这一条"
+        title={t('tile.undoEntry')}
         disabled={busy}
         onClick={onRemove}
       >×</button>
@@ -177,12 +180,13 @@ export function TimeEditor({ instant, busy, onSubmit, onCancel }: {
   readonly onSubmit: (time: string) => void
   readonly onCancel: () => void
 }): JSX.Element {
-  const fields: readonly FieldSpec[] = [TIME_FIELD]
+  const t = useCopy()
+  const fields: readonly FieldSpec[] = [timeField(t)]
   return (
     <FieldForm
       fields={fields}
       initial={{ time: timeValueOf(instant) }}
-      submitLabel="保存"
+      submitLabel={t('form.save')}
       busy={busy}
       onSubmit={payload => onSubmit(String(payload.time))}
       onCancel={onCancel}

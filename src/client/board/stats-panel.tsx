@@ -8,23 +8,31 @@
  */
 import { useEffect, useMemo, useState, type JSX } from 'react'
 import type { HabitClient } from '../api.ts'
+import { useCopy, type Copy } from '../copy/index.tsx'
 import type { ClockView, RunPoint, StatsView } from '../types.ts'
 import { DataCard } from './data.tsx'
-import { fractionText, mediaStatusLabel, messageOf, percentOf } from './format.ts'
+import { durationText, fractionText, mediaStatusLabel, messageOf, percentOf } from './format.ts'
+import { habitLabel } from './names.ts'
 import { clusterRuns } from './run-curve.ts'
-import { ropeDurationText } from '../../shared/rope.ts'
+import { ropeDurationOf } from '../../shared/rope.ts'
 import { shiftDayKey } from '../../shared/habit-day.ts'
 import { Pills, Tile, TileHead } from './tile.tsx'
 
 /** The preset ranges the panel offers. */
 type RangeKey = 'week' | 'month' | 'd30' | 'd90'
 
-const RANGES: readonly { readonly value: RangeKey; readonly label: string }[] = [
-  { value: 'week', label: '近 7 天' },
-  { value: 'month', label: '本月' },
-  { value: 'd30', label: '近 30 天' },
-  { value: 'd90', label: '近 90 天' },
-]
+/**
+ * The pills' options, named at render time: a module-level table would freeze
+ * whichever language was active when the module loaded.
+ */
+function rangeOptions(t: Copy): readonly { readonly value: RangeKey; readonly label: string }[] {
+  return [
+    { value: 'week', label: t('stats.range.week') },
+    { value: 'month', label: t('stats.range.month') },
+    { value: 'd30', label: t('stats.range.d30') },
+    { value: 'd90', label: t('stats.range.d90') },
+  ]
+}
 
 /** The range a preset names, inside the given habit day. */
 function presetRange(key: RangeKey, today: string): { from: string; to: string } {
@@ -69,31 +77,35 @@ function MetricCard({ title, rows }: {
 
 /** The habit × day heat grid. */
 function HeatGrid({ stats }: { readonly stats: StatsView }): JSX.Element {
+  const t = useCopy()
   return (
     <Tile span={2}>
       <TileHead
-        title="完成热力图"
-        meta={`${stats.days.length} 天 · 完美日 ${stats.perfectDays}`}
+        title={t('stats.heat.title')}
+        meta={t('stats.heat.meta', { days: stats.days.length, perfect: stats.perfectDays })}
       />
       <div className="pt-heat">
         {stats.habits.map(habit => (
           <div className="pt-heat-row" key={habit.id}>
-            <span className="pt-heat-label">{habit.label ?? habit.id}</span>
+            <span className="pt-heat-label">{habitLabel(habit.id, t)}</span>
             <span className="pt-heat-cells">
               {habit.perDay.map((met, index) => (
                 <span
                   key={stats.days[index]?.date ?? String(index)}
                   className={met ? 'pt-heat-cell pt-heat-on' : 'pt-heat-cell'}
-                  title={`${stats.days[index]?.date ?? ''}　${met ? '完成' : '未完成'}`}
+                  title={t('stats.heat.cell', {
+                    date: stats.days[index]?.date ?? '',
+                    state: t(met ? 'chip.done' : 'chip.missing'),
+                  })}
                 />
               ))}
             </span>
             <span className="pt-heat-count">{habit.met}/{habit.days}</span>
-            <span className="pt-heat-streak">连续 {habit.streak}</span>
+            <span className="pt-heat-streak">{t('stats.heat.streak', { count: habit.streak })}</span>
           </div>
         ))}
       </div>
-      <div className="pt-muted">每格一天；「连续」是到区间结束为止的连续达标天数</div>
+      <div className="pt-muted">{t('stats.heat.note')}</div>
     </Tile>
   )
 }
@@ -121,8 +133,9 @@ function shadeOf(index: number, count: number): string {
  * nothing faster beats.
  */
 function Curve({ points }: { readonly points: readonly RunPoint[] }): JSX.Element {
+  const t = useCopy()
   if (points.length === 0) {
-    return <span className="pt-muted">这段时间没有同时记录了里程与心率的跑步</span>
+    return <span className="pt-muted">{t('curve.empty')}</span>
   }
   const clusters = clusterRuns(points)
   const shade = new Map(clusters.map((cluster, index) => [cluster.key, shadeOf(index, clusters.length)]))
@@ -149,7 +162,7 @@ function Curve({ points }: { readonly points: readonly RunPoint[] }): JSX.Elemen
 
   return (
     <>
-      <svg className="pt-curve" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="心率-配速散点，按里程分色">
+      <svg className="pt-curve" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={t('curve.aria')}>
         <line className="pt-curve-axis" x1={pad} y1={height - pad} x2={width - pad} y2={height - pad} />
         <line className="pt-curve-axis" x1={pad} y1={pad} x2={pad} y2={height - pad} />
         {clusters.map(cluster => cluster.frontier.length < 2 ? null : (
@@ -171,7 +184,7 @@ function Curve({ points }: { readonly points: readonly RunPoint[] }): JSX.Elemen
             // rule is exactly what flattened this ramp into one green once.
             style={{ fill: shade.get(cluster.key) }}
           >
-            <title>{`${point.date} · ${point.km} km · ${fmt(point.pace)} 分/km · ♥${point.avgHr}`}</title>
+            <title>{t('curve.point', { date: point.date, km: point.km, pace: fmt(point.pace), hr: point.avgHr })}</title>
           </circle>
         )))}
         {clusters.flatMap(cluster => cluster.frontier.map(point => (
@@ -184,7 +197,7 @@ function Curve({ points }: { readonly points: readonly RunPoint[] }): JSX.Elemen
             style={{ stroke: shade.get(cluster.key) }}
           />
         )))}
-        <text className="pt-curve-tick" x={width / 2} y={height - 6} textAnchor="middle">配速（越右越快）</text>
+        <text className="pt-curve-tick" x={width / 2} y={height - 6} textAnchor="middle">{t('curve.xAxis')}</text>
         <text className="pt-curve-tick" x={pad - 4} y={pad + 4} textAnchor="end">♥{maxHr}</text>
         <text className="pt-curve-tick" x={pad - 4} y={height - pad} textAnchor="end">♥{minHr}</text>
         <text className="pt-curve-tick" x={pad} y={height - pad + 12}>{fmt(maxPace)}</text>
@@ -195,10 +208,10 @@ function Curve({ points }: { readonly points: readonly RunPoint[] }): JSX.Elemen
           {clusters.map(cluster => (
             <span className="pt-curve-key" key={`key:${cluster.key}`}>
               <i style={{ background: shade.get(cluster.key) }} />
-              {cluster.key} km · {cluster.points.length} 次
+              {t('curve.legend', { km: cluster.key, count: cluster.points.length })}
             </span>
           ))}
-          <span className="pt-curve-key"><span className="pt-curve-key-dash" />前沿</span>
+          <span className="pt-curve-key"><span className="pt-curve-key-dash" />{t('curve.frontier')}</span>
         </div>
       )}
     </>
@@ -212,6 +225,7 @@ export interface StatsPanelProps {
 
 /** Render the statistics panel. */
 export function StatsPanel({ client }: StatsPanelProps): JSX.Element {
+  const t = useCopy()
   const [clock, setClock] = useState<ClockView | null>(null)
   const [preset, setPreset] = useState<RangeKey>('month')
   const [custom, setCustom] = useState<{ from?: string; to?: string }>({})
@@ -229,8 +243,8 @@ export function StatsPanel({ client }: StatsPanelProps): JSX.Element {
   }, [preset, custom, today])
 
   useEffect(() => {
-    void client.clock().then(setClock).catch((cause: unknown) => setError(messageOf(cause)))
-  }, [client])
+    void client.clock().then(setClock).catch((cause: unknown) => setError(messageOf(cause, t)))
+  }, [client, t])
 
   useEffect(() => {
     if (range === null || range.from > range.to) return
@@ -243,7 +257,7 @@ export function StatsPanel({ client }: StatsPanelProps): JSX.Element {
         setError(null)
       })
       .catch((cause: unknown) => {
-        if (alive) setError(messageOf(cause))
+        if (alive) setError(messageOf(cause, t))
       })
       .finally(() => {
         if (alive) setBusy(false)
@@ -251,31 +265,35 @@ export function StatsPanel({ client }: StatsPanelProps): JSX.Element {
     return () => {
       alive = false
     }
-  }, [client, range, reload])
+  }, [client, range, reload, t])
 
+  const dash = t('unit.dash')
   const registryRows: readonly (readonly [string, string])[] = stats === null ? [] : [
-    ['完成（区间）', `${stats.media.finished}`],
-    ['在列 / 弃', `${stats.media.active} / ${stats.media.dropped}`],
-    ['电影 / 书', `${stats.media.films} / ${stats.media.books}`],
-    ['平均评分', stats.media.avgRating === undefined ? '——' : `${stats.media.avgRating}`],
-    ['任务完成（区间）', `${stats.tasks.done}`],
-    ['其中逾期完成', `${stats.tasks.doneLate}`],
-    ['未完成 / 进行中', `${stats.tasks.open} / ${stats.tasks.doing}`],
-    ['当前逾期', `${stats.tasks.overdue}`],
-    ['累计专注', `${Math.round(stats.focus.seconds / 60)} 分（${stats.focus.sessions} 段）`],
+    [t('stats.media.finished'), `${stats.media.finished}`],
+    [t('stats.media.listed'), `${stats.media.active} / ${stats.media.dropped}`],
+    [t('stats.media.kinds'), `${stats.media.films} / ${stats.media.books}`],
+    [t('stats.media.rating'), stats.media.avgRating === undefined ? dash : `${stats.media.avgRating}`],
+    [t('stats.tasks.done'), `${stats.tasks.done}`],
+    [t('stats.tasks.doneLate'), `${stats.tasks.doneLate}`],
+    [t('stats.tasks.open'), `${stats.tasks.open} / ${stats.tasks.doing}`],
+    [t('stats.tasks.overdue'), `${stats.tasks.overdue}`],
+    [t('stats.focus.total'), t('stats.focus.detail', {
+      minutes: Math.round(stats.focus.seconds / 60),
+      sessions: stats.focus.sessions,
+    })],
   ]
 
   return (
     <div className="pt-panel">
       <header className="pt-panel-head">
-        <h2>习惯统计</h2>
+        <h2>{t('stats.title')}</h2>
         {range === null ? null : <span className="pt-muted">{range.from} → {range.to}</span>}
         <span className="pt-grow" />
-        <Pills value={preset} options={RANGES} onChange={setPreset} />
+        <Pills value={preset} options={rangeOptions(t)} onChange={setPreset} />
         <input
           className="pt-input"
           type="date"
-          title="自定义起始日"
+          title={t('stats.range.from')}
           max={today === '' ? undefined : today}
           value={custom.from ?? range?.from ?? ''}
           onChange={event => setCustom(current => ({ ...current, from: event.target.value }))}
@@ -283,89 +301,100 @@ export function StatsPanel({ client }: StatsPanelProps): JSX.Element {
         <input
           className="pt-input"
           type="date"
-          title="自定义结束日"
+          title={t('stats.range.to')}
           max={today === '' ? undefined : today}
           value={custom.to ?? range?.to ?? ''}
           onChange={event => setCustom(current => ({ ...current, to: event.target.value }))}
         />
-        <button type="button" className="pt-ghost" disabled={busy} onClick={() => setCustom({})}>默认范围</button>
+        <button type="button" className="pt-ghost" disabled={busy} onClick={() => setCustom({})}>{t('stats.range.reset')}</button>
       </header>
 
       {error === null ? null : <div className="pt-error">{error}</div>}
       {stats === null
-        ? <div className="pt-muted">加载中…</div>
+        ? <div className="pt-muted">{t('stats.loading')}</div>
         : (
           <>
             <HeatGrid stats={stats} />
 
             <div className="pt-cards">
-              <MetricCard title="背单词" rows={[
-                ['新词 / 复习', `${stats.vocab.new} / ${stats.vocab.review}`],
-                ['总时长', `${stats.vocab.minutes} 分`],
-                ['达标天数', `${stats.vocab.daysMet} / ${stats.days.length}`],
-                ['超额', `${stats.vocab.surplus}`],
+              <MetricCard title={t('habit.vocab')} rows={[
+                [t('stats.row.newReview'), `${stats.vocab.new} / ${stats.vocab.review}`],
+                [t('stats.row.minutes'), t('unit.minutes', { minutes: stats.vocab.minutes })],
+                [t('stats.row.daysMet'), `${stats.vocab.daysMet} / ${stats.days.length}`],
+                [t('stats.row.surplus'), `${stats.vocab.surplus}`],
               ]} />
-              <MetricCard title="多邻国" rows={[
-                ['节数', `${stats.duolingo.lessons}`],
-                ['时长', `${stats.duolingo.minutes} 分`],
-                ['达标天数', `${stats.duolingo.daysMet} / ${stats.days.length}`],
+              <MetricCard title={t('habit.duolingo')} rows={[
+                [t('stats.row.lessons'), `${stats.duolingo.lessons}`],
+                [t('stats.row.duration'), t('unit.minutes', { minutes: stats.duolingo.minutes })],
+                [t('stats.row.daysMet'), `${stats.duolingo.daysMet} / ${stats.days.length}`],
               ]} />
-              <MetricCard title="跑步" rows={[
-                ['次数', `${stats.runs.count}`],
-                ['里程', `${stats.runs.km} km`],
-                ['平均心率', stats.runs.avgHr === undefined ? '——' : `${stats.runs.avgHr}`],
+              <MetricCard title={t('stats.card.run')} rows={[
+                [t('stats.row.runs'), `${stats.runs.count}`],
+                [t('stats.row.km'), `${stats.runs.km} km`],
+                [t('stats.row.avgHr'), stats.runs.avgHr === undefined ? dash : `${stats.runs.avgHr}`],
               ]} />
-              <MetricCard title="跳绳" rows={[
-                ['记录天数', `${stats.rope.days}`],
-                ['总次数', `${stats.rope.count}`],
-                ['总时长', ropeDurationText(stats.rope.seconds)],
+              <MetricCard title={t('stats.card.rope')} rows={[
+                [t('stats.row.ropeDays'), `${stats.rope.days}`],
+                [t('stats.row.totalJumps'), `${stats.rope.count}`],
+                [t('stats.row.minutes'), durationText(ropeDurationOf(stats.rope.seconds), t)],
                 // One rate over the range's totals: averaging per-record rates
                 // would let a 2-minute sprint outweigh a 20-minute session.
-                ['平均节奏', stats.rope.tempo === undefined ? '——' : `${fractionText(stats.rope.tempo)} 次/分`],
-                ['平均心率', stats.rope.avgHr === undefined ? '——' : `${stats.rope.avgHr}`],
+                [t('stats.row.tempo'), stats.rope.tempo === undefined
+                  ? dash
+                  : t('report.tempo', { tempo: fractionText(stats.rope.tempo) })],
+                [t('stats.row.avgHr'), stats.rope.avgHr === undefined ? dash : `${stats.rope.avgHr}`],
               ]} />
-              <MetricCard title="引体向上" rows={[
-                ['组数', `${stats.pullup.sets}`],
-                ['支撑总时长', `${stats.pullup.seconds} 秒`],
+              <MetricCard title={t('stats.card.pullup')} rows={[
+                [t('stats.row.sets'), `${stats.pullup.sets}`],
+                [t('stats.row.hold'), t('unit.seconds', { seconds: stats.pullup.seconds })],
               ]} />
-              <MetricCard title="平板支撑" rows={[
-                ['组数', `${stats.plank.sets}`],
-                ['支撑总时长', `${stats.plank.seconds} 秒`],
+              <MetricCard title={t('stats.card.plank')} rows={[
+                [t('stats.row.sets'), `${stats.plank.sets}`],
+                [t('stats.row.hold'), t('unit.seconds', { seconds: stats.plank.seconds })],
               ]} />
-              <MetricCard title="健身器材" rows={[
-                ['组数 / 动作数', `${stats.equipment.sets} / ${stats.equipment.reps}`],
+              <MetricCard title={t('stats.card.equipment')} rows={[
+                [t('stats.row.setsAndMoves'), `${stats.equipment.sets} / ${stats.equipment.reps}`],
                 ...stats.equipment.byName.slice(0, 3)
                   .map(entry => [
                     entry.weight === undefined ? entry.name : `${entry.name} ${entry.weight}kg`,
-                    `${entry.sets} 组 · ${entry.reps} 次`,
+                    t('stats.equipment.entry', { sets: entry.sets, reps: entry.reps }),
                   ] as const),
               ]} />
-              <MetricCard title="自由锻炼" rows={[
-                ['次数', `${stats.free.sessions}`],
-                ['总时长', `${stats.free.minutes} 分`],
+              <MetricCard title={t('stats.card.free')} rows={[
+                [t('stats.row.sessions'), `${stats.free.sessions}`],
+                [t('stats.row.minutes'), t('unit.minutes', { minutes: stats.free.minutes })],
                 // Only unmeasured sessions are the reason the two counts can
                 // differ, so the caveat appears exactly when it applies.
                 ...(stats.free.sessions === stats.free.kcalSessions
-                  ? [['消耗', stats.free.kcal === 0 ? '——' : `${stats.free.kcal} kcal`] as const]
-                  : [['消耗', `${stats.free.kcal} kcal（${stats.free.kcalSessions} 次有记录）`] as const]),
+                  ? [[t('stats.row.kcal'), stats.free.kcal === 0 ? dash : t('report.free.kcal', { kcal: stats.free.kcal })] as const]
+                  : [[t('stats.row.kcal'), t('stats.free.kcalMeasured', {
+                    kcal: stats.free.kcal,
+                    count: stats.free.kcalSessions,
+                  })] as const]),
               ]} />
-              <MetricCard title="洗衣" rows={[
-                ['洗涤次数', `${stats.washing.count}`],
-                ['总件数', `${stats.washing.pieces}`],
+              <MetricCard title={t('laundry.title')} rows={[
+                [t('stats.row.washes'), `${stats.washing.count}`],
+                [t('stats.row.pieces'), `${stats.washing.pieces}`],
               ]} />
-              <MetricCard title="三餐" rows={[
-                ['早饭打卡', `${stats.meals.breakfast.days} 天（${percentOf(stats.meals.breakfast.ratio)}%）`],
-                ['总花费', `¥${stats.meals.spend}`],
+              <MetricCard title={t('meal.title')} rows={[
+                [t('stats.row.breakfast'), t('stats.meals.breakfastValue', {
+                  days: stats.meals.breakfast.days,
+                  percent: percentOf(stats.meals.breakfast.ratio),
+                })],
+                [t('stats.row.spend'), `¥${stats.meals.spend}`],
               ]} />
             </div>
 
             <div className="pt-columns">
               <Tile span={1}>
-                <TileHead title="心率-配速曲线" meta={`${stats.runs.points.length} 个点`} />
+                <TileHead
+                  title={t('curve.title')}
+                  meta={t('curve.points', { count: stats.runs.points.length })}
+                />
                 <Curve points={stats.runs.points} />
               </Tile>
               <Tile span={1}>
-                <TileHead title="登记" />
+                <TileHead title={t('stats.registry.title')} />
                 <div className="pt-facts">
                   {registryRows.map(([label, value]) => (
                     <div className="pt-fact" key={label}>
@@ -379,10 +408,10 @@ export function StatsPanel({ client }: StatsPanelProps): JSX.Element {
                     {stats.media.recently.map(entry => (
                       <div className="pt-list-row" key={entry.id}>
                         <span className="pt-list-text">
-                          <span className="pt-badge">{entry.kind === 'film' ? '影' : '书'}</span>
+                          <span className="pt-badge">{entry.kind === 'film' ? t('focus.kind.film') : t('focus.kind.book')}</span>
                           {' '}
                           {entry.title}
-                          <span className="pt-muted"> · {mediaStatusLabel(entry.status)}</span>
+                          <span className="pt-muted"> · {mediaStatusLabel(entry.status, t)}</span>
                         </span>
                       </div>
                     ))}

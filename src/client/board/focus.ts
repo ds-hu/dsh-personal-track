@@ -12,6 +12,8 @@
  * derived fact now (`recentFocus` in `src/shared/focus-session.ts`), so the only
  * focus state left in the panel is the in-memory target of an open overlay.
  */
+import type { Copy } from '../copy/index.tsx'
+import { weekdayNameOf } from './format.ts'
 import type { MediaEntry, RegistryKind, StateView, TaskEntry } from '../types.ts'
 
 /** Either registry entry, as the focus surfaces handle them. */
@@ -97,10 +99,9 @@ export function clockLabel(at: Date): string {
   return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
 }
 
-/** The current clock time with its weekday: `HH:mm · 周三`. */
-export function nowLabel(at: Date): string {
-  const week = '日一二三四五六'[at.getDay()] ?? ''
-  return `${clockLabel(at)} · 周${week}`
+/** The current clock time with its weekday: `HH:mm · 周三` / `HH:mm · Wed`. */
+export function nowLabel(at: Date, copy: Copy): string {
+  return `${clockLabel(at)} · ${weekdayNameOf(at, copy)}`
 }
 
 /**

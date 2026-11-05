@@ -251,7 +251,13 @@ export function createApiHandler(deps: ApiDeps): HabitHandler {
       sendJson(res, 200, result)
     } catch (error) {
       if (error instanceof ApiError) {
-        sendJson(res, error.status, { error: { code: error.code, message: error.message } })
+        sendJson(res, error.status, {
+          error: {
+            code: error.code,
+            message: error.message,
+            ...(error.params === undefined ? {} : { params: error.params }),
+          },
+        })
         return
       }
       if ((error as { code?: string }).code === 'missing-key') {

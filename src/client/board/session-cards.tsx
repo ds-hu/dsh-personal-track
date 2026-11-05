@@ -11,6 +11,7 @@
  * without extra code.
  */
 import { useReducer, type JSX } from 'react'
+import { useCopy } from '../copy/index.tsx'
 import { IDLE, editor, isAdding, isEditing, type EditorAction, type EditorState } from './editor-state.ts'
 import { FieldForm, type FieldSpec } from './fields.tsx'
 import { timeField, timeValueOf } from './format.ts'
@@ -39,21 +40,22 @@ export interface SessionListProps {
 export function SessionList({
   title, entries, fields, summarize, busy, addLabel, emptyLabel, onAdd, onPatch, onRemove,
 }: SessionListProps): JSX.Element {
+  const t = useCopy()
   const [mode, dispatch] = useReducer(
     (state: EditorState, action: EditorAction) => editor(state, action, entries.map(entry => entry.id)),
     IDLE,
   )
   // Built per render so the add form opens on the current clock time; an entry
   // being edited overrides it through `initial` below.
-  const allFields: readonly FieldSpec[] = [timeField(), ...fields]
+  const allFields: readonly FieldSpec[] = [timeField(t), ...fields]
 
   return (
     <>
       <div className="pt-sub-head">
         <span className="pt-sub-title">{title}</span>
-        {entries.length === 0 ? <span className="pt-muted">{emptyLabel ?? '无记录'}</span> : null}
+        {entries.length === 0 ? <span className="pt-muted">{emptyLabel ?? t('list.empty')}</span> : null}
         <IconButton
-          label={addLabel ?? '添加'}
+          label={addLabel ?? t('tile.add')}
           disabled={busy}
           onClick={() => dispatch({ kind: 'open-add' })}
         >＋</IconButton>
@@ -65,7 +67,7 @@ export function SessionList({
             key={entry.id}
             fields={allFields}
             initial={{ time: timeValueOf(String(entry.at ?? '')), ...entry }}
-            submitLabel="保存"
+            submitLabel={t('form.save')}
             busy={busy}
             onSubmit={(payload) => {
               onPatch(entry.id, payload)
@@ -77,8 +79,8 @@ export function SessionList({
         : (
           <div className="pt-list-row" key={entry.id}>
             <span className="pt-list-text">{summarize(entry)}</span>
-            <IconButton label="编辑" disabled={busy} onClick={() => dispatch({ kind: 'edit', id: entry.id })}>✎</IconButton>
-            <IconButton label="删除" disabled={busy} onClick={() => onRemove(entry.id)}>×</IconButton>
+            <IconButton label={t('tile.edit')} disabled={busy} onClick={() => dispatch({ kind: 'edit', id: entry.id })}>✎</IconButton>
+            <IconButton label={t('tile.remove')} disabled={busy} onClick={() => onRemove(entry.id)}>×</IconButton>
           </div>
         )))}
 
@@ -86,7 +88,7 @@ export function SessionList({
         ? (
           <FieldForm
             fields={allFields}
-            submitLabel="添加"
+            submitLabel={t('tile.add')}
             busy={busy}
             onSubmit={(payload) => {
               onAdd(payload)
@@ -109,10 +111,11 @@ export function SessionList({
  * (see `VocabCard`), which is why there is no tone prop here.
  */
 export function SessionTile({ label, title, ...list }: SessionListProps & { readonly label: string }): JSX.Element {
+  const t = useCopy()
   const tone = list.entries.length > 0 ? 'done' : 'idle'
   return (
     <Tile span={2} tone={tone}>
-      <TileHead title={label} meta={`${list.entries.length} 条`} />
+      <TileHead title={label} meta={t('tile.entries', { count: list.entries.length })} />
       <SessionList title={title} {...list} />
     </Tile>
   )

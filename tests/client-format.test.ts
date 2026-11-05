@@ -18,7 +18,6 @@ import {
   messageOf,
   parseCheckpoints,
   percentOf,
-  TIME_FIELD,
   timeField,
   weekEndKey,
 } from '../src/client/board/format.ts'
@@ -26,6 +25,10 @@ import { daysBetween, habitDayKey, shiftDayKey } from '../src/shared/habit-day.t
 import { dayReport } from '../src/client/board/report.ts'
 import { isEntryView } from '../src/client/board/focus.ts'
 import type { ClockView, StateView, TaskEntry } from '../src/client/types.ts'
+import { copyFor } from './support.ts'
+
+/** The panel's words, in Chinese: these cases assert what a Chinese reader sees. */
+const t = copyFor('zh')
 
 let passed = 0
 
@@ -60,15 +63,16 @@ check('the current clock time is a well-formed HH:mm', () => {
   assert.match(clockTimeOf(), /^([01]\d|2[0-3]):[0-5]\d$/)
 })
 check('the time field carries the current clock time as its default', () => {
-  const field = timeField()
+  const field = timeField(t)
   assert.equal(field.name, 'time')
   assert.equal(field.kind, 'time')
   assert.match(String(field.defaultValue), /^([01]\d|2[0-3]):[0-5]\d$/)
   assert.equal(field.optional, undefined, 'time stays required, now that it arrives filled in')
 })
-check('the shared constant stays empty, so no default is frozen at import', () => {
-  assert.equal(Object.hasOwn(TIME_FIELD, 'defaultValue'), false)
-  assert.match(String(timeField().defaultValue), /^([01]\d|2[0-3]):[0-5]\d$/)
+check('the time field is built per render, so no default is frozen at import', () => {
+  const first = timeField(t)
+  assert.notEqual(timeField(t), first, 'a fresh object per call, never a shared constant')
+  assert.match(String(first.defaultValue), /^([01]\d|2[0-3]):[0-5]\d$/)
 })
 
 console.log('deadline proximity (the board colours it)')
@@ -132,23 +136,23 @@ check('an uncomputable ratio reads as zero rather than NaN', () => {
 
 console.log('media status labels')
 check('the three known statuses are translated', () => {
-  assert.equal(mediaStatusLabel('active'), '在列')
-  assert.equal(mediaStatusLabel('done'), '完成')
-  assert.equal(mediaStatusLabel('dropped'), '弃')
+  assert.equal(mediaStatusLabel('active', t), '在列')
+  assert.equal(mediaStatusLabel('done', t), '完成')
+  assert.equal(mediaStatusLabel('dropped', t), '弃')
 })
 check('an unknown status falls back to itself rather than to blank', () => {
-  assert.equal(mediaStatusLabel('owned'), 'owned')
+  assert.equal(mediaStatusLabel('owned', t), 'owned')
 })
 
 console.log('failure text')
 check('a host code is shown beside the message', () => {
   const failure = Object.assign(new Error('洗漱每日至多两次'), { code: 'habit/check-limit' })
-  assert.equal(messageOf(failure), '洗漱每日至多两次（habit/check-limit）')
+  assert.equal(messageOf(failure, t), '洗漱每日至多两次（habit/check-limit）')
 })
 check('a plain error and a non-error both degrade sensibly', () => {
-  assert.equal(messageOf(new Error('boom')), 'boom')
-  assert.equal(messageOf('just a string'), 'just a string')
-  assert.equal(messageOf(undefined), 'undefined')
+  assert.equal(messageOf(new Error('boom'), t), 'boom')
+  assert.equal(messageOf('just a string', t), 'just a string')
+  assert.equal(messageOf(undefined, t), 'undefined')
 })
 
 console.log('the plain-text day report (what the copy button lands)')
@@ -227,12 +231,12 @@ function taskOf(entry: Omit<TaskEntry, 'materials' | 'focusSessions' | 'focusSec
   return { materials: [], focusSessions: [], focusSeconds: 0, ...entry }
 }
 
-const reportText = dayReport(reportState, reportClock)
+const reportText = dayReport(reportState, reportClock, t)
 check('the header names the day (or the night tail) and the completion figure', () => {
   assert.ok(reportText.startsWith('习惯日报 9月20日 周日\n'), reportText.split('\n')[0])
   assert.ok(reportText.includes('完成 4.5/9（50%）'), reportText.split('\n')[1])
   const nightClock = { ...reportClock, nightTail: true }
-  assert.ok(dayReport(reportState, nightClock).includes('9月20日 周日夜'))
+  assert.ok(dayReport(reportState, nightClock, t).includes('9月20日 周日夜'))
 })
 check('each group is one line, with the details it used to drop', () => {
   assert.ok(reportText.includes('洗漱 2/2 · 洗澡 ✓ · 待洗 4 件'))
@@ -266,7 +270,7 @@ check('a legacy rope set list merges into the same figure', () => {
     },
   }
   assert.ok(
-    dayReport(legacy, reportClock).includes('跳绳 270 个 3 分 90 次/分 ♥140'),
+    dayReport(legacy, reportClock, t).includes('跳绳 270 个 3 分 90 次/分 ♥140'),
     'an old document reads as one record, not as a list of sets',
   )
 })
@@ -296,7 +300,7 @@ check('the task list reads in the board\'s order: deadline ascending, undated la
       taskOf({ id: 't1', title: '英语口语', category: '英听说 A', due: '2026-09-20', progress: { current: 2, total: 5 }, checkpoints: [], createdAt: '2026-09-18T10:00:00', state: 'doing', overdue: false }),
     ],
   }
-  const tail = dayReport(shuffled, reportClock).split('任务：\n\n')[1]
+  const tail = dayReport(shuffled, reportClock, t).split('任务：\n\n')[1]
   assert.equal(
     tail,
     [
@@ -320,7 +324,7 @@ check('a finished task is listed only while its deadline is today or later', () 
       taskOf({ id: 'd', title: '没有截止的', progress: { current: 1 }, checkpoints: [], createdAt: '2026-09-10T10:00:00', completedAt: '2026-09-11T18:00:00', state: 'done', overdue: false }),
     ],
   }
-  const tail = dayReport(state, reportClock).split('任务：\n\n')[1]
+  const tail = dayReport(state, reportClock, t).split('任务：\n\n')[1]
   assert.equal(
     tail,
     '- 今天的作业 4/4（9-20） ✓\n- 下周的作业 2/2（9-26） ✓',
@@ -341,7 +345,7 @@ check('an empty day still reports its zeros, and keeps every group line', () => 
     },
     tasks: [],
   }
-  const bare = dayReport(empty, reportClock)
+  const bare = dayReport(empty, reportClock, t)
   assert.ok(bare.includes('完成 0/9（0%）'))
   assert.ok(bare.includes('洗漱 0/2 · 洗澡 —'))
   assert.ok(bare.includes('三餐 早 — · 午 — · 晚 —'), 'the slots are named even when empty')
@@ -358,21 +362,21 @@ check('formatting sorts by position and joins one per line', () => {
   )
 })
 check('parsing takes the last @ as the separator and skips blank lines', () => {
-  assert.deepEqual(parseCheckpoints('第一章@10\n\n晚自习@3@20'), {
+  assert.deepEqual(parseCheckpoints('第一章@10\n\n晚自习@3@20', t), {
     list: [{ label: '第一章', at: 10 }, { label: '晚自习@3', at: 20 }],
   })
 })
 check('a line that is not label@position is a problem, not a guess', () => {
-  assert.equal(parseCheckpoints('第一章 10').problem, '检查点第 1 行要形如「第一章@10」')
-  assert.equal(parseCheckpoints('@10').problem, '检查点第 1 行要形如「第一章@10」')
-  assert.equal(parseCheckpoints('第一章@').problem, '检查点第 1 行要形如「第一章@10」')
-  assert.equal(parseCheckpoints('第一章@0').problem, '检查点第 1 行要形如「第一章@10」')
-  assert.equal(parseCheckpoints('第一章@2.5').problem, '检查点第 1 行要形如「第一章@10」')
-  assert.equal(parseCheckpoints('第一章@10\n坏行').problem, '检查点第 2 行要形如「第一章@10」')
+  assert.equal(parseCheckpoints('第一章 10', t).problem, '检查点第 1 行要形如「第一章@10」')
+  assert.equal(parseCheckpoints('@10', t).problem, '检查点第 1 行要形如「第一章@10」')
+  assert.equal(parseCheckpoints('第一章@', t).problem, '检查点第 1 行要形如「第一章@10」')
+  assert.equal(parseCheckpoints('第一章@0', t).problem, '检查点第 1 行要形如「第一章@10」')
+  assert.equal(parseCheckpoints('第一章@2.5', t).problem, '检查点第 1 行要形如「第一章@10」')
+  assert.equal(parseCheckpoints('第一章@10\n坏行', t).problem, '检查点第 2 行要形如「第一章@10」')
 })
 check('an empty textarea is an empty list, never a problem', () => {
-  assert.deepEqual(parseCheckpoints(''), { list: [] })
-  assert.deepEqual(parseCheckpoints(' \n\n'), { list: [] })
+  assert.deepEqual(parseCheckpoints('', t), { list: [] })
+  assert.deepEqual(parseCheckpoints(' \n\n', t), { list: [] })
 })
 
 console.log('what a registry answer must be before focus mode adopts it')
@@ -408,6 +412,27 @@ check('only a view is adoptable, never the stored record', () => {
   assert.equal(isEntryView(undefined), false)
   assert.equal(isEntryView(null), false)
   assert.equal(isEntryView('entry'), false)
+})
+
+// The other half of the i18n contract: the same figures, said in English. The
+// report is the one surface that leaves the panel (it is pasted into a chat), so
+// it is the one whose translation is asserted rather than assumed.
+//
+// What is *not* translated is content: an equipment name, a task title and a
+// category are the user's own words, and they read in whatever language they
+// were typed in. The guard therefore names the panel's own words, not the
+// absence of Han.
+check('the report speaks the language the shell is in, and keeps its figures', () => {
+  const english = dayReport(reportState, reportClock, copyFor('en'))
+  const [header, completion] = english.split('\n')
+  assert.ok(header!.startsWith('Habit report '), header)
+  assert.ok(completion!.startsWith('Done 4.5/9 (50%)'), completion)
+  assert.ok(english.includes('Wash up 2/2 · Shower ✓'), 'the group words travel with the language')
+  assert.ok(english.includes('Vocabulary 55%'), 'a habit is named by its dictionary row, not by the host')
+  assert.ok(english.includes('Rope 1200 skips'), english)
+  assert.ok(english.includes('Tasks:'), 'the task list is still announced')
+  // Figures are not translated: a pace and a distance read the same in both.
+  assert.ok(english.includes('6\'00"/km'), english)
 })
 
 console.log(`\n${passed} checks passed`)

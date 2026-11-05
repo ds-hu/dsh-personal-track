@@ -10,7 +10,7 @@ import { strict as assert } from 'node:assert'
 import {
   mergeRope,
   ropeCount,
-  ropeDurationText,
+  ropeDurationOf,
   ropeTempo,
 } from '../src/shared/rope.ts'
 import { createChecker } from './support.ts'
@@ -85,13 +85,16 @@ check('a day with no measurement has no average, like a run without a strap', ()
   assert.equal(mergeRope([{ id: 'r1', at: 'a', count: 100, seconds: 60 }])?.avgHr, undefined)
 })
 
-console.log('how a duration is printed')
+// The shared half decides the *unit* only; the words are the panel's.
+console.log('how a duration is measured')
 check('under a minute keeps its seconds; a minute or more reads in minutes', () => {
-  assert.equal(ropeDurationText(45), '45 秒')
-  assert.equal(ropeDurationText(60), '1 分')
-  assert.equal(ropeDurationText(90), '1.5 分')
-  assert.equal(ropeDurationText(100), '1.7 分')
-  assert.equal(ropeDurationText(0), '0 秒')
+  assert.deepEqual(ropeDurationOf(45), { unit: 'seconds', value: 45 })
+  assert.deepEqual(ropeDurationOf(0), { unit: 'seconds', value: 0 })
+  assert.deepEqual(ropeDurationOf(59), { unit: 'seconds', value: 59 })
+  assert.deepEqual(ropeDurationOf(60), { unit: 'minutes', value: 1 })
+  assert.deepEqual(ropeDurationOf(90), { unit: 'minutes', value: 1.5 })
+  // Rounded to one decimal, the same rule the card has always printed.
+  assert.deepEqual(ropeDurationOf(100), { unit: 'minutes', value: 1.7 })
 })
 
 report()

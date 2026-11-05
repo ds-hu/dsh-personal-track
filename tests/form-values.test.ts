@@ -15,7 +15,11 @@
 import { strict as assert } from 'node:assert'
 import { initialValuesOf } from '../src/client/board/form-values.ts'
 import type { FieldSpec } from '../src/client/board/fields.tsx'
-import { timeField, TIME_FIELD } from '../src/client/board/format.ts'
+import { timeField } from '../src/client/board/format.ts'
+import { copyFor } from './support.ts'
+
+/** The panel's words, in Chinese: these cases assert what a Chinese reader sees. */
+const t = copyFor('zh')
 
 let passed = 0
 
@@ -71,16 +75,18 @@ check('a field the initial does not mention keeps its default', () => {
 console.log('the running tile\'s own field set')
 check('a fresh run opens on the current clock, an edited one on its own instant', () => {
   // The two calls `RunTile` makes: no entry at all, then an existing one.
-  const fresh = initialValuesOf([timeField()])
+  const fresh = initialValuesOf([timeField(t)])
   assert.match(String(fresh.time), /^([01]\d|2[0-3]):[0-5]\d$/, 'the clock, as the tile now opens')
 
-  const edited = initialValuesOf([timeField()], { time: '07:03' })
+  const edited = initialValuesOf([timeField(t)], { time: '07:03' })
   assert.equal(edited.time, '07:03', 'and an edited run keeps the instant it was recorded at')
 })
-check('the shared time constant carries no default of its own', () => {
-  // `timeField()` builds a fresh default per call; a default baked into the
-  // constant would freeze at import and drift away from the clock.
-  assert.equal(Object.hasOwn(TIME_FIELD, 'defaultValue'), false)
+check('the time field carries its own default, and a fresh one per call', () => {
+  // `timeField()` builds a fresh default per call; a default baked into a
+  // module constant would freeze at import and drift away from the clock.
+  const first = timeField(t)
+  assert.equal(Object.hasOwn(first, 'defaultValue'), true)
+  assert.notEqual(timeField(t), first)
 })
 
 console.log(`\n${passed} checks passed`)

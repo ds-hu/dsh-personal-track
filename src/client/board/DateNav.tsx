@@ -7,6 +7,7 @@
  */
 import { useState, type JSX } from 'react'
 import { shiftDayKey } from '../../shared/habit-day.ts'
+import { useCopy } from '../copy/index.tsx'
 import { dayLabelOf } from './format.ts'
 
 /** Props for the navigator. */
@@ -20,6 +21,7 @@ export interface DateNavProps {
 
 /** Render the navigator. */
 export function DateNav({ date, today, night, onChange }: DateNavProps): JSX.Element {
+  const t = useCopy()
   const [jump, setJump] = useState('')
   const atToday = date >= today
   const isNight = night && date === today
@@ -30,19 +32,19 @@ export function DateNav({ date, today, night, onChange }: DateNavProps): JSX.Ele
         <button
           type="button"
           className="pt-icon"
-          title="前一天"
-          aria-label="前一天"
+          title={t('date.previous')}
+          aria-label={t('date.previous')}
           onClick={() => onChange(shiftDayKey(date, -1))}
         >‹</button>
         <div className="pt-nav-label">
-          {dayLabelOf(date, isNight)}
-          {isNight ? <small className="pt-muted"> · 凌晨时段</small> : null}
+          {dayLabelOf(date, isNight, t)}
+          {isNight ? <small className="pt-muted"> · {t('date.nightTag')}</small> : null}
         </div>
         <button
           type="button"
           className="pt-icon"
-          title="后一天"
-          aria-label="后一天"
+          title={t('date.next')}
+          aria-label={t('date.next')}
           disabled={atToday}
           onClick={() => onChange(shiftDayKey(date, 1))}
         >›</button>
@@ -50,9 +52,9 @@ export function DateNav({ date, today, night, onChange }: DateNavProps): JSX.Ele
           type="button"
           className="pt-ghost"
           disabled={atToday}
-          title="回到当前习惯日"
+          title={t('date.back')}
           onClick={() => onChange(today)}
-        >今天</button>
+        >{t('date.todayButton')}</button>
       </div>
       <div className="pt-nav-second">
         <input
@@ -64,9 +66,9 @@ export function DateNav({ date, today, night, onChange }: DateNavProps): JSX.Ele
             setJump(event.target.value)
             if (event.target.value !== '') onChange(event.target.value)
           }}
-          title="跳转到某一天补卡"
+          title={t('date.jump')}
         />
-        <span className="pt-muted">{date === today ? '当前习惯日' : '补卡中'}</span>
+        <span className="pt-muted">{date === today ? t('date.current') : t('date.backfilling')}</span>
       </div>
     </div>
   )

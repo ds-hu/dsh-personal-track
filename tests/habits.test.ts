@@ -23,6 +23,7 @@ import {
 } from '../src/host/habits.ts'
 import { dayCells } from '../src/host/derive.ts'
 import { dayRecord } from '../src/host/domain.ts'
+import { COPY } from '../src/client/copy/table.ts'
 
 let passed = 0
 
@@ -49,11 +50,24 @@ check('洗漱 owns two cells and stays one habit', () => {
   assert.deepEqual(wash.cells.map(cell => cell.id), ['wash1', 'wash2'])
   assert.equal(habitOf('shower').cells.length, 1)
 })
-check('every habit is addressable by its own id, and carries a label', () => {
+check('every habit is addressable by its own id', () => {
   for (const habit of HABITS) {
     assert.equal(habitOf(habit.id), habit)
-    assert.notEqual(habit.label.trim(), '', `${habit.id} needs a display name`)
-    for (const cell of habit.cells) assert.notEqual(cell.label.trim(), '', `${cell.id} needs a label`)
+    for (const cell of habit.cells) assert.equal(new Set(CELL_IDS).has(cell.id), true, `${cell.id} is a bar cell`)
+  }
+})
+check('every habit and cell id has a name in the panel’s dictionary', () => {
+  // The other half of dropping labels from the host: the names have to exist
+  // somewhere, and "somewhere" is a dictionary row in the browser half
+  // (`src/client/copy/table.ts`). A habit added to the inventory without its
+  // row would render as its bare id — the one failure a type system cannot see,
+  // because the two halves are separate programs.
+  for (const habit of HABITS) {
+    assert.ok(`habit.${habit.id}` in COPY, `habit.${habit.id} needs a dictionary row`)
+    for (const cell of habit.cells) {
+      const named = `cell.${cell.id}` in COPY || `habit.${cell.id}` in COPY
+      assert.equal(named, true, `cell.${cell.id} needs a dictionary row`)
+    }
   }
 })
 check('a 打卡 habit states its daily cap, and no other form carries one', () => {
@@ -69,8 +83,9 @@ console.log('the bar reads the inventory')
 check('the bar lists exactly the inventory cells, in inventory order', () => {
   const cells = dayCells(undefined)
   assert.deepEqual(barIds(cells), [...CELL_IDS])
-  const labels = HABITS.flatMap(habit => habit.cells.map(cell => cell.label))
-  assert.deepEqual(cells.map(cell => cell.label), labels, 'labels come from the inventory, not a second table')
+  // An id and nothing else: the name is the panel's, so the bar must not carry
+  // one (a `label` here would be a second, unmaintained naming table).
+  assert.deepEqual(cells.map(cell => cell.label), CELL_IDS.map(() => undefined), 'habit cells travel unnamed')
 })
 check('a perfect day fills every cell', () => {
   const day = dayRecord.parse({

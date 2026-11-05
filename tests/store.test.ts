@@ -433,7 +433,10 @@ await checkAsync('two washing-up checks land, and a third is refused', async () 
   const { store } = storeAt()
   await store.addCheck(DATE, 'wash', '2026-09-16T07:00:00Z')
   await store.addCheck(DATE, 'wash', '2026-09-16T22:00:00Z')
-  await assert.rejects(() => store.addCheck(DATE, 'wash', '2026-09-16T23:00:00Z'), /至多两次/)
+  await assert.rejects(
+    () => store.addCheck(DATE, 'wash', '2026-09-16T23:00:00Z'),
+    (cause: { code?: string }) => cause.code === 'habit/check-limit',
+  )
   assert.deepEqual(store.readDay(DATE)?.washes.times, ['2026-09-16T07:00:00Z', '2026-09-16T22:00:00Z'])
 })
 
@@ -460,7 +463,15 @@ await checkAsync('a day already holding three washes still reads, and cannot gro
   const { store } = storeAt()
   await store.mutateDay(DATE, day => ({ ...day, washes: { times: ['a', 'b', 'c'] } }))
   assert.equal(store.readDay(DATE)?.washes.times.length, 3, 'the stored day is still readable')
-  await assert.rejects(() => store.addCheck(DATE, 'wash', 'd'), /至多两次/)
+  // The refusal is asserted by code and by the habit it names: the sentence
+  // itself is the panel's, translated there (`error.habit.check-limit`), so a
+  // test that matched Chinese prose would only be checking the host's own
+  // fallback wording.
+  await assert.rejects(
+    () => store.addCheck(DATE, 'wash', 'd'),
+    (cause: { code?: string; params?: { habit?: string } }) =>
+      cause.code === 'habit/check-limit' && cause.params?.habit === 'wash',
+  )
   await store.removeCheck(DATE, 'wash', 0)
   assert.equal(store.readDay(DATE)?.washes.times.length, 2, 'one deletion brings it back under the cap')
 })
@@ -468,7 +479,11 @@ await checkAsync('a day already holding three washes still reads, and cannot gro
 await checkAsync('a shower is one record, not a list', async () => {
   const { store } = storeAt()
   await store.addCheck(DATE, 'shower', '2026-09-16T07:00:00Z')
-  await assert.rejects(() => store.addCheck(DATE, 'shower', '2026-09-16T08:00:00Z'), /至多一次/)
+  await assert.rejects(
+    () => store.addCheck(DATE, 'shower', '2026-09-16T08:00:00Z'),
+    (cause: { code?: string; params?: { habit?: string } }) =>
+      cause.code === 'habit/check-limit' && cause.params?.habit === 'shower',
+  )
   assert.equal(store.readDay(DATE)?.shower.at, '2026-09-16T07:00:00Z', 'the first instant stands')
   await store.removeCheck(DATE, 'shower')
   assert.equal(store.readDay(DATE)?.shower.at, null)

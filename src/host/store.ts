@@ -335,8 +335,8 @@ function checkLimitOf(habit: CheckHabit): number {
  * a new 打卡 habit cannot be added without deciding what its refusal reads like.
  */
 const CHECK_LIMIT_MESSAGE: Record<CheckHabit, string> = {
-  wash: '洗漱每日至多两次',
-  shower: '洗澡每日至多一次',
+  wash: 'that habit is already recorded twice today',
+  shower: 'that habit is already recorded once today',
 }
 
 /** Build the store over an opened domain. */
@@ -562,11 +562,13 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
       // thing this store promises cannot happen.
       return store.mutateDay(key, (day) => {
         if (habit === 'shower') {
-          if (day.shower.at !== null) throw new ApiError(409, 'habit/check-limit', CHECK_LIMIT_MESSAGE.shower)
+          if (day.shower.at !== null) {
+            throw new ApiError(409, 'habit/check-limit', CHECK_LIMIT_MESSAGE.shower, { habit: 'shower' })
+          }
           return { ...day, shower: { at } }
         }
         if (day.washes.times.length >= checkLimitOf(habit)) {
-          throw new ApiError(409, 'habit/check-limit', CHECK_LIMIT_MESSAGE.wash)
+          throw new ApiError(409, 'habit/check-limit', CHECK_LIMIT_MESSAGE.wash, { habit: 'wash' })
         }
         return { ...day, washes: { times: [...day.washes.times, at] } }
       })

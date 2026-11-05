@@ -22,6 +22,8 @@ import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { createHabitClient } from './api.ts'
 import { BoardIcon } from './board/BoardBody.tsx'
 import { TrackPanel } from './board/TrackPanel.tsx'
+import { DICTIONARIES } from './copy/index.tsx'
+import { COPY_NAMESPACE } from './locale.ts'
 import { ensureBoardStyles } from './styles.ts'
 
 /**
@@ -29,10 +31,11 @@ import { ensureBoardStyles } from './styles.ts'
  *
  * Every `ctx.<prop>` service access needs its name here — cordis resolves
  * service props through the fiber's inject set and throws
- * `cannot get property "prop" without inject` otherwise. Only the two
- * registration faces are touched now, so the list is down to `slots`.
+ * `cannot get property "prop" without inject` otherwise. `locale` is the
+ * shell's language service, composed by the web app; the panel says nothing
+ * the user reads without it.
  */
-export const inject = ['slots']
+export const inject = ['slots', 'locale']
 
 /** The one main-area panel this plugin owns. */
 const PANEL_ID = 'personal-track-board' as MainPanelId
@@ -41,14 +44,20 @@ const PANEL_ID = 'personal-track-board' as MainPanelId
 export function apply(ctx: Context): void {
   ensureBoardStyles()
   const client = createHabitClient()
+  const { locale } = ctx
+  // The dictionaries belong to the plugin, not to a component: registering them
+  // here means a re-mounted panel cannot collide with its own earlier
+  // registration, and the sidebar label below can be read before any render.
+  const copy = locale.bind(COPY_NAMESPACE)
+  ctx.effect(() => locale.register(COPY_NAMESPACE, DICTIONARIES), 'personal-track: dictionaries')
 
   ctx.effect(() => ctx.slots.inject('main', () => ctx.slots.register(
-    { name: 'main', key: PANEL_ID, inject: () => ({ client }) },
+    { name: 'main', key: PANEL_ID, inject: () => ({ client, locale }) },
     TrackPanel,
   )), 'personal-track: board panel')
 
   ctx.effect(() => ctx.slots.inject('sidebar.panellist', () => ctx.slots.register(
-    { name: 'sidebar.panellist', id: PANEL_ID, order: 20, label: () => '习惯看板' },
+    { name: 'sidebar.panellist', id: PANEL_ID, order: 20, label: () => copy('panel.title') },
     BoardIcon,
   )), 'personal-track: sidebar entry')
 }
