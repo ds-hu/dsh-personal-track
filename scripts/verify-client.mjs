@@ -275,6 +275,34 @@ for (const [, selectorList, body] of bare.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
   )
 }
 
+// The meal rows size their label column from the label, never from a number.
+// `width: 26px` fitted the two-character Chinese labels and nothing else: under
+// English "Breakfast" overflowed its column and "Dinner" ran into its time
+// ("Dinner18:46"). A number here is a guess about a language, and no test that
+// renders one language can notice the guess going wrong — so the shape is
+// asserted instead of the pixels.
+//
+// The row has to dissolve into the grid for the cells to share those columns.
+// A row that keeps its own `display:flex` puts every label back in a queue of
+// its own, where the columns stop being columns and nothing lines up at all —
+// which is exactly what the first attempt at this fix did.
+const mealList = bodiesFor('.pt-meals')
+assert.ok(mealList.length > 0, 'the stylesheet declares .pt-meals')
+assert.ok(
+  mealList.some(body => /grid-template-columns:\s*max-content/.test(body)),
+  '.pt-meals takes its label column from the widest label (max-content), not from a number',
+)
+assert.ok(
+  bodiesFor('.pt-meal').some(body => /display:\s*contents/.test(body)),
+  '.pt-meal dissolves into the grid, so its cells share the label column',
+)
+for (const body of bodiesFor('.pt-meal-label')) {
+  assert.ok(
+    !/(?:^|;)\s*width\s*:/.test(body),
+    `.pt-meal-label promises a fixed width, which is a guess about one language (${body.trim()})`,
+  )
+}
+
 // The one structural line inside the overlay is the split between its columns,
 // so it is drawn in the heavy weight while the cards keep the light one — on the
 // desktop as a vertical rule, on a phone as a horizontal one. Both halves are

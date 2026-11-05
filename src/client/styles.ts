@@ -239,12 +239,32 @@ body[data-ds-dark-theme] .pt-track {
 .pt-plus:disabled { opacity: .3; cursor: default; }
 
 /* ---- meal rows ------------------------------------------------------- */
-.pt-meals { display: flex; flex-direction: column; gap: 3px; }
-.pt-meal { display: flex; align-items: center; gap: 7px; min-height: 24px; }
-.pt-meal-label { font-size: 11px; opacity: .7; width: 26px; flex: none; }
-.pt-meal-time { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.pt-meal-price { font-size: 11px; opacity: .65; font-variant-numeric: tabular-nums; }
-.pt-meal-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; }
+/*
+ * The list is the grid, and the rows are dissolved into it, because the label
+ * column has to be as wide as the widest label rather than as wide as two
+ * characters.
+ *
+ * The old rule was a 26px width on the label, which fitted 早饭/午饭/晚饭 and
+ * nothing else: under English the label simply overflowed its box and painted
+ * over the time ("Dinner18:46"), and the empty Breakfast row ran on with no
+ * gap. Any number here is a guess that the next language invalidates —
+ * max-content asks the browser instead, so the column is 26px in Chinese and
+ * 52px in English without either language being named.
+ *
+ * display:contents on the row is what lets the four cells share those
+ * columns; it also takes the row's box away, which is why the height and the
+ * gaps moved up here. Each cell pins its column: the price is conditional, and
+ * a row without one would otherwise slide the actions into its place.
+ */
+.pt-meals {
+  display: grid; grid-template-columns: max-content auto 1fr auto;
+  column-gap: 7px; row-gap: 3px; grid-auto-rows: minmax(24px, auto); align-items: center;
+}
+.pt-meal { display: contents; }
+.pt-meal-label { grid-column: 1; font-size: 11px; opacity: .7; }
+.pt-meal-time { grid-column: 2; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pt-meal-price { grid-column: 3; font-size: 11px; opacity: .65; font-variant-numeric: tabular-nums; }
+.pt-meal-actions { grid-column: 4; justify-self: end; display: inline-flex; align-items: center; gap: 3px; }
 .pt-meal-done .pt-meal-label { opacity: 1; }
 
 /* ---- metrics and bars ------------------------------------------------ */
