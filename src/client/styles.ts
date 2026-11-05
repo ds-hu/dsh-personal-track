@@ -27,7 +27,36 @@ const CSS = `
   --pt-red: rgba(232,96,96,.95);
   --pt-red-soft: rgba(232,96,96,.14);
   --pt-red-line: rgba(232,96,96,.45);
+  /*
+   * The distance ramp of the run curve, shortest bucket first. Five hues rather
+   * than five strengths of one: distance buckets are categories the eye has to
+   * tell apart at a glance, and a single-hue ramp reads as "the same green" even
+   * when the alpha steps are wide. The order still runs cool-to-warm, so longer
+   * reads as later; the legend carries the numbers.
+   *
+   * Solid, not translucent, because a hue cannot be mixed into a grey the way
+   * the rest of the palette can — so the dark shell gets its own set below.
+   */
+  --pt-curve-1: #5b9bd5;
+  --pt-curve-2: #46aeb0;
+  --pt-curve-3: #4fa96f;
+  --pt-curve-4: #9aa845;
+  --pt-curve-5: #c9973d;
   font-size: 13px; line-height: 1.45;
+}
+/*
+ * The ramp's dark set: the same five steps, lightened so even the cool end
+ * carries on a near-black surface. Keyed off the shell's own dark marker, like
+ * every other theme swap here — never off the OS preference.
+ */
+body[data-ds-dark-theme] .pt-board,
+body[data-ds-dark-theme] .pt-panel,
+body[data-ds-dark-theme] .pt-track {
+  --pt-curve-1: #7db4e6;
+  --pt-curve-2: #63c9c9;
+  --pt-curve-3: #6fca92;
+  --pt-curve-4: #bdc96e;
+  --pt-curve-5: #e8b664;
 }
 .pt-board {
   display: flex; flex-direction: column; gap: 9px; padding: 10px 10px 26px;
@@ -397,9 +426,22 @@ const CSS = `
 
 .pt-curve { width: 100%; height: auto; max-height: 220px; }
 .pt-curve-axis { stroke: var(--pt-line-strong); stroke-width: 1; }
-.pt-curve-line { fill: none; stroke: var(--pt-info-line); stroke-width: 1.5; }
-.pt-curve-dot { fill: var(--pt-accent); }
+/* The only line in the chart: one distance bucket's un-dominated runs. Neither
+ * its stroke nor a dot's fill may be declared here — a rule on the element wins
+ * over the colour the component hands it, which is how the five shades once
+ * came out as one green. Colour travels as an inline style; geometry lives here. */
+.pt-curve-front { fill: none; stroke-width: 1.8; stroke-dasharray: 5 3; stroke-linecap: round; }
+/* A ring around a frontier point: "this one is the best at its distance", which
+ * is a different claim from "this is a run". */
+.pt-curve-flag { fill: none; stroke-width: 1.1; stroke-opacity: .6; }
 .pt-curve-tick { fill: currentColor; opacity: .5; font-size: 9px; }
+.pt-curve-legend {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 1px 10px;
+  font-size: 11px; opacity: .72; font-variant-numeric: tabular-nums;
+}
+.pt-curve-key { display: inline-flex; align-items: center; gap: 4px; }
+.pt-curve-key i { width: 7px; height: 7px; border-radius: 50%; }
+.pt-curve-key-dash { width: 13px; border-top: 1.5px dashed currentColor; opacity: .6; }
 
 /* ---- narrow fallback ------------------------------------------------- */
 @media (max-width: 260px) {

@@ -9,6 +9,7 @@
  */
 import { paceMinPerKm, streakFor } from './derive.ts'
 import { focusSeconds } from '../shared/focus-session.ts'
+import { mergeRope, ropeTempo } from '../shared/rope.ts'
 import { HABITS, habitMet, type Habit, type HabitId } from './habits.ts'
 import { dayKeyRange, habitDayKey, type DayKey } from '../shared/habit-day.ts'
 import type { DayBoundary } from './config.ts'
@@ -81,10 +82,14 @@ export interface StatsView {
     readonly points: readonly RunPoint[]
   }
   readonly rope: {
-    readonly sets: number
-    readonly sets90: number
-    readonly sets180: number
+    /** Days that recorded at least one rope entry. */
+    readonly days: number
+    /** Jumps across the range. */
+    readonly count: number
     readonly seconds: number
+    /** Jumps per minute over the range total; absent with no duration. */
+    readonly tempo?: number
+    /** Mean of the days that measured one, weighted within each day. */
     readonly avgHr?: number
   }
   readonly pullup: { readonly sets: number; readonly seconds: number }
@@ -246,9 +251,8 @@ export function buildStats(
   let runKm = 0
   const runHr: number[] = []
   const ropeHr: number[] = []
-  let ropeSets = 0
-  let rope90 = 0
-  let rope180 = 0
+  let ropeDays = 0
+  let ropeCount = 0
   let ropeSeconds = 0
   let pullupSets = 0
   let pullupSeconds = 0
@@ -278,12 +282,14 @@ export function buildStats(
         })
       }
     }
-    for (const set of day.rope) {
-      ropeSets += 1
-      if (set.preset === 90) rope90 += 1
-      else rope180 += 1
-      ropeSeconds += set.seconds
-      if (set.avgHr !== undefined) ropeHr.push(set.avgHr)
+    // One record a day in the new shape, but a legacy day may still hold the
+    // sets it was written with: merge first, so both shapes read identically.
+    const rope = mergeRope(day.rope)
+    if (rope !== null) {
+      ropeDays += 1
+      ropeCount += rope.count
+      ropeSeconds += rope.seconds
+      if (rope.avgHr !== undefined) ropeHr.push(rope.avgHr)
     }
     pullupSets += day.pullup.length
     for (const set of day.pullup) pullupSeconds += set.seconds
@@ -309,6 +315,9 @@ export function buildStats(
       }
     }
   }
+
+  /** One rate over the range's totals, so long and short days weigh themselves. */
+  const ropeRate = ropeTempo(ropeCount, ropeSeconds)
 
   // --- meals
   const mealSlots = ['breakfast', 'lunch', 'dinner'] as const
@@ -379,10 +388,10 @@ export function buildStats(
       points: runPoints,
     },
     rope: {
-      sets: ropeSets,
-      sets90: rope90,
-      sets180: rope180,
+      days: ropeDays,
+      count: ropeCount,
       seconds: ropeSeconds,
+      ...(ropeRate === undefined ? {} : { tempo: round1(ropeRate) }),
       ...(average(ropeHr) === undefined ? {} : { avgHr: Math.round(average(ropeHr) as number) }),
     },
     pullup: { sets: pullupSets, seconds: pullupSeconds },

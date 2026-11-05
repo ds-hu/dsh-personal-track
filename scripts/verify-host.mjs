@@ -202,15 +202,18 @@ console.log('laundry ✓  (correction leaves no event; a wash decrements and rec
 
 // --- training session kinds (M3) --------------------------------------------
 const rope = await api.call('POST', '/session', {
-  date: DATE, kind: 'rope', entry: { preset: 90, seconds: 45, avgHr: 130 },
+  date: DATE, kind: 'rope', entry: { count: 120, seconds: 60, avgHr: 130 },
 })
 assert.equal(rope.status, 200)
 assert.equal(rope.body.day.day.rope.length, 1)
-assert.equal(rope.body.day.day.rope[0].preset, 90, 'the preset stays a number, not a string')
-const rope180 = await api.call('POST', '/session', {
-  date: DATE, kind: 'rope', entry: { preset: 180, seconds: 95 },
+assert.equal(rope.body.day.day.rope[0].count, 120, 'the count is a number, not a string')
+// One record a day, like a run: the second write replaces the first instead of
+// appending a set, and the day's figure is the one the board will edit.
+const ropeAgain = await api.call('POST', '/session', {
+  date: DATE, kind: 'rope', entry: { count: 300, seconds: 120, avgHr: 140 },
 })
-assert.equal(rope180.body.day.day.rope.length, 2, 'several sets a day are allowed')
+assert.equal(ropeAgain.body.day.day.rope.length, 1, 'a day holds one rope record')
+assert.equal(ropeAgain.body.day.day.rope[0].count, 300)
 
 const pullup = await api.call('POST', '/session', { date: DATE, kind: 'pullup', entry: { seconds: 32 } })
 assert.equal(pullup.body.day.day.pullup[0].seconds, 32)
@@ -234,7 +237,7 @@ assert.equal(
 const badKind = await api.call('POST', '/session', { date: DATE, kind: 'swimming', entry: {} })
 assert.equal(badKind.status, 400, 'an unknown session kind is refused')
 assert.equal(badKind.body.error.code, 'habit/bad-request')
-console.log('training sessions ✓  (rope presets stay numeric, any number of sets, unknown kinds refused)')
+console.log('training sessions ✓  (rope keeps one free-count record a day, unknown kinds refused)')
 
 const changedRun = await api.call('PUT', '/run', { date: DATE, minutes: 25, distanceKm: 5 })
 assert.equal(changedRun.body.day.day.run.minutes, 25, 'an explicit duration wins over the default')
@@ -328,7 +331,10 @@ assert.equal(dayStats.days[0].done, 5, 'one wash, shower, lunch, duolingo, and t
 assert.equal(dayStats.days[0].stored, true)
 assert.equal(dayStats.vocab.daysMet, 0, 'the vocabulary session was deleted')
 assert.equal(dayStats.duolingo.lessons, 1)
-assert.equal(dayStats.rope.sets, 2)
+assert.equal(dayStats.rope.days, 1)
+assert.equal(dayStats.rope.count, 300)
+assert.equal(dayStats.rope.tempo, 150, '300 jumps in 120 seconds')
+assert.equal(dayStats.rope.avgHr, 140)
 assert.equal(dayStats.pullup.sets, 1)
 assert.equal(dayStats.equipment.reps, 30)
 assert.deepEqual(
@@ -427,15 +433,31 @@ await rm(LEGACY_ROOT, { recursive: true, force: true })
 await mkdir(join(LEGACY_ROOT, 'habit', 'days'), { recursive: true })
 await writeFile(
   join(LEGACY_ROOT, 'habit', 'days', `${DATE}.json`),
-  JSON.stringify({ version: 1, record: { date: DATE, washes: { times: ['2026-09-16T07:00:00.000Z'] } } }),
+  JSON.stringify({
+    version: 1,
+    record: {
+      date: DATE,
+      washes: { times: ['2026-09-16T07:00:00.000Z'] },
+      // The old rope shape: a fixed-count set, not a free count. It must still
+      // read (and still fill the training cell) when the new build opens it.
+      rope: [{ id: 'legacy-rope', at: '2026-09-16T10:00:00.000Z', preset: 90, seconds: 60, avgHr: 120 }],
+    },
+  }),
   'utf8',
 )
 const legacy = await mount(LEGACY_ROOT)
 const legacyDay = await legacy.call('GET', `/state?date=${DATE}`)
 assert.equal(legacyDay.status, 200)
 assert.equal(legacyDay.body.day.day.washes.times.length, 1, 'a version 1 document is read, not discarded')
-assert.deepEqual(legacyDay.body.day.progress, { done: 1, total: 9 }, 'and every derived value is recomputed')
+assert.equal(legacyDay.body.day.day.rope[0].preset, 90, 'a legacy rope set still reads')
+assert.deepEqual(legacyDay.body.day.progress, { done: 2, total: 9 }, 'and every derived value is recomputed')
 assert.equal(legacyDay.body.tasks.length, 0, 'its records read as having no materials, not as broken')
+const legacyStats = (await legacy.call('GET', `/stats?from=${DATE}&to=${DATE}`)).body
+assert.deepEqual(
+  legacyStats.rope,
+  { days: 1, count: 90, seconds: 60, tempo: 90, avgHr: 120 },
+  'the statistics merge the old sets into the one record the panel shows',
+)
 await legacy.stop()
 await rm(LEGACY_ROOT, { recursive: true, force: true })
 console.log('legacy data ✓  (a version 1 document survives the version 2 schema)')

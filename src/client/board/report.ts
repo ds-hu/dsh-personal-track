@@ -14,13 +14,16 @@
  * already sent: no extra reads and no truth of its own — every figure is one
  * the board is already showing for the same day.
  *
- * Tasks are the one cross-day registry that appears, and they appear as what is
- * still **remaining**: every unfinished task, whatever its deadline — the day
- * it is due, a later one, or none — each at its *current* progress and in the
- * board's own order. Finished tasks are not remaining, so the list does not
- * carry them.
+ * Tasks are the one cross-day registry that appears. The list carries every
+ * unfinished task, whatever its deadline — the day it is due, a later one, or
+ * none — each at its *current* progress and in the board's own order. It also
+ * carries a finished task whose deadline is today or later: finishing today's
+ * homework is part of today, and a report about the day should say so. A
+ * finished task past its deadline has already sunk into the board's archive,
+ * and one with no deadline says nothing about a day at all, so neither is listed.
  */
 import type { ClockView, EquipmentSession, FreeSession, Meal, StateView } from '../types.ts'
+import { mergeRope, ropeDurationText, ropeTempo } from '../../shared/rope.ts'
 import { dayLabelOf, fractionText, moneyOf, paceLabel, paceOf, percentOf } from './format.ts'
 import { byDeadline } from './task-order.ts'
 
@@ -147,13 +150,12 @@ function fitnessLine(state: StateView): Line {
         + `${pace === undefined ? '' : ` ${paceLabel(pace)}`}`
         + `${record.run.avgHr === undefined ? '' : ` ♥${record.run.avgHr}`}`)
     }
-    if (record.rope.length > 0) {
-      const setsOf = (preset: 90 | 180): number => record.rope.filter(set => set.preset === preset).length
-      const detail = [
-        setsOf(90) > 0 ? `90×${setsOf(90)}` : null,
-        setsOf(180) > 0 ? `180×${setsOf(180)}` : null,
-      ].filter(value => value !== null).join(' ')
-      parts.push(`跳绳 ${record.rope.length} 组${detail === '' ? '' : `（${detail}）`}`)
+    const rope = mergeRope(record.rope)
+    if (rope !== null) {
+      const tempo = ropeTempo(rope.count, rope.seconds)
+      parts.push(`跳绳 ${rope.count} 个 ${ropeDurationText(rope.seconds)}`
+        + `${tempo === undefined ? '' : ` ${fractionText(tempo)} 次/分`}`
+        + `${rope.avgHr === undefined ? '' : ` ♥${rope.avgHr}`}`)
     }
     if (record.pullup.length > 0) {
       parts.push(`引体 ${record.pullup.length} 组（${secondsList(record.pullup)}）`)
@@ -171,37 +173,41 @@ function fitnessLine(state: StateView): Line {
   return parts.length === 0 ? '健身 —' : parts.join(' · ')
 }
 
-/** `9-24` — a deadline shown short inside the remaining-task list. */
+/** `9-24` — a deadline shown short inside the task list. */
 function dueMark(due: string): string {
   const [, month, day] = due.split('-')
   return `${Number(month)}-${Number(day)}`
 }
 
 /**
- * 任务: what is still remaining, at its current progress — one Markdown list
- * item each, so a long registry stays readable and pastes as a list rather than
- * as one crammed line.
+ * 任务: what the board's task tile is showing, at its current progress — one
+ * Markdown list item each, so a long registry stays readable and pastes as a
+ * list rather than as one crammed line.
  *
- * Every unfinished task is named, whatever its deadline: one due today needs no
- * mark, one past its deadline reads（逾期）, a later one carries its date, and a
- * checkbox task carries none. The order is the board's own (`./task-order.ts`),
- * so the export reads top to bottom exactly as the tile does.
+ * Two kinds of entry are named: every unfinished task, and every *finished* one
+ * whose deadline is today or later (see the module comment). The deadline is
+ * always printed as `月-日`, an overdue one with 逾期 beside it: a report
+ * pasted into a chat outlives the "today" it was written on, so a bare 逾期
+ * would leave the reader unable to tell how late it is. A finished item ends
+ * with ` ✓`, and the order is the board's own (`./task-order.ts`), so the
+ * export reads top to bottom exactly as the tile does.
  */
 function taskLines(state: StateView, clock: ClockView): Line {
-  const open = state.tasks.filter(task => task.state !== 'done').sort(byDeadline)
-  if (open.length === 0) return null
-  const items = open.map((task) => {
+  const listed = state.tasks
+    .filter(task => task.state !== 'done' || (task.due !== undefined && task.due >= clock.today))
+    .sort(byDeadline)
+  if (listed.length === 0) return null
+  const items = listed.map((task) => {
     const progress = task.progress.total === undefined
       ? ''
       : ` ${fractionText(task.progress.current)}/${fractionText(task.progress.total)}`
-    const mark = task.overdue
-      ? '（逾期）'
-      : task.due !== undefined && task.due > clock.today ? `（${dueMark(task.due)}）` : ''
-    return `- ${task.title}${task.category === undefined ? '' : `（${task.category}）`}${progress}${mark}`
+    const due = task.due === undefined ? '' : `（${dueMark(task.due)}${task.overdue ? ' 逾期' : ''}）`
+    const finished = task.state === 'done' ? ' ✓' : ''
+    return `- ${task.title}${task.category === undefined ? '' : `（${task.category}）`}${progress}${due}${finished}`
   })
   // The blank line keeps the list a list in renderers that will not let one
   // interrupt the paragraph above it.
-  return `剩余任务：\n\n${items.join('\n')}`
+  return `任务：\n\n${items.join('\n')}`
 }
 
 /** The whole report: a header, the completion figure, then one line per group. */

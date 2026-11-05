@@ -2,11 +2,13 @@
  * The generic session list: a sub-header with an add action, then one row per
  * stored entry that can be edited in place (time and metrics) or deleted.
  *
- * Every session-bearing habit — vocabulary, duolingo, jump rope, pull-ups,
- * plank, equipment — is this list plus a field description and a one-line
- * summary, so
- * the editing behaviour is identical everywhere. The clock-time field is added
- * here, which is why every session can be retimed without extra code.
+ * Every session-bearing habit except jump rope — vocabulary, duolingo,
+ * pull-ups, plank, equipment, free-form training — is this list plus a field
+ * description and a one-line summary, so
+ * the editing behaviour is identical everywhere. Jump rope is the single-record
+ * exception (see `RopeTile`), because it answers the same question a run does.
+ * The clock-time field is added here, which is why every session can be retimed
+ * without extra code.
  */
 import { useReducer, type JSX } from 'react'
 import { IDLE, editor, isAdding, isEditing, type EditorAction, type EditorState } from './editor-state.ts'

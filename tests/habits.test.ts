@@ -125,7 +125,7 @@ check('any one kind of training fills it', () => {
   // record of any of them is a whole trained day.
   const trainings: readonly (readonly [string, Record<string, unknown>])[] = [
     ['running', { run: { at: 'x', minutes: 30, distanceKm: 5 } }],
-    ['jump rope', { rope: [{ id: 'r', at: 'x', preset: 90, seconds: 40 }] }],
+    ['jump rope', { rope: [{ id: 'r', at: 'x', count: 90, seconds: 40 }] }],
     ['pull-ups', { pullup: [{ id: 'u', at: 'x', seconds: 20 }] }],
     ['plank', { plank: [{ id: 'p', at: 'x', seconds: 45 }] }],
     ['equipment', { equipment: [{ id: 'e', at: 'x', name: '划船机', reps: 20 }] }],

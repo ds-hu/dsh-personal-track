@@ -257,6 +257,28 @@ assert.ok(
   'the focus column is dropped on a phone rather than stacked above the board',
 )
 
+// The run curve's shades are five custom properties the component names by
+// number (`var(--pt-curve-3)`). One that is not declared is silent in all three
+// places at once: the type checker only sees a string, the stylesheet still
+// parses, and an SVG circle whose `fill` does not resolve paints black. So the
+// ramp is asserted here rather than eyeballed in a screenshot.
+const ramp = [...new Set([...bare.matchAll(/--pt-curve-(\d)\s*:/g)].map(([, step]) => Number(step)))]
+  .sort((left, right) => left - right)
+assert.deepEqual(ramp, [1, 2, 3, 4, 5], 'the curve declares every shade it names by number')
+// A hue cannot be mixed into the shell's translucent greys, so the ramp is the
+// one palette here that needs a dark set of its own. Losing it is silent: the
+// chart keeps drawing, just in colours chosen for a white page.
+assert.equal(
+  [...bare.matchAll(/--pt-curve-1\s*:/g)].length,
+  2,
+  'the distance ramp is declared for the light and the dark shell alike',
+)
+assert.match(
+  bare,
+  /body\[data-ds-dark-theme\][^{]*\{[^}]*--pt-curve-1\s*:/,
+  'the dark ramp hangs off the shell\'s dark marker, not the OS preference',
+)
+
 // Focus mode has to close its session when the page goes away. A refresh is a
 // real end of the session, and a session left open is discarded by the store at
 // the next start — so the visit's time is lost. No type checker and no

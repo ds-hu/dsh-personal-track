@@ -163,6 +163,21 @@ check('a task defaults to zero progress with no total', () => {
   assert.equal(fresh.progress.total, undefined)
   assert.equal(fresh.completedAt, undefined)
 })
+check('a rope record needs a free count or a legacy preset', () => {
+  // Neither field is a shape storage may produce: the count is what replaced
+  // the preset, and an old document always carried one of the two.
+  assert.throws(() => dayRecord.parse({
+    date: '2026-09-16', rope: [{ id: 'r', at: 'x', seconds: 40 }],
+  }))
+  assert.equal(
+    dayRecord.parse({ date: '2026-09-16', rope: [{ id: 'r', at: 'x', count: 120, seconds: 40 }] }).rope[0]!.count,
+    120,
+  )
+  assert.equal(
+    dayRecord.parse({ date: '2026-09-16', rope: [{ id: 'r', at: 'x', preset: 90, seconds: 40 }] }).rope[0]!.preset,
+    90,
+  )
+})
 
 console.log('cells (the completion bar)')
 check('an absent day completes nothing', () => {

@@ -66,11 +66,14 @@ export interface Washing {
   readonly pieces: number
 }
 
-/** A jump-rope session. */
+/** One jump-rope record; a legacy document may still carry a preset set. */
 export type RopeSession = {
   readonly id: string
   readonly at: string
-  readonly preset: 90 | 180
+  /** Jumps in this record; absent only on a legacy preset set. */
+  readonly count?: number
+  /** Legacy fixed-count set; read for compatibility, never written. */
+  readonly preset?: 90 | 180
   readonly seconds: number
   readonly avgHr?: number
 }
@@ -390,10 +393,11 @@ export interface StatsView {
     readonly points: readonly RunPoint[]
   }
   readonly rope: {
-    readonly sets: number
-    readonly sets90: number
-    readonly sets180: number
+    readonly days: number
+    readonly count: number
     readonly seconds: number
+    /** Jumps per minute over the range total; absent with no duration. */
+    readonly tempo?: number
     readonly avgHr?: number
   }
   readonly pullup: { readonly sets: number; readonly seconds: number }

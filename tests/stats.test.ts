@@ -41,7 +41,7 @@ await checkAsync('an empty range reports zeros rather than throwing', async () =
   assert.deepEqual(stats.vocab, { new: 0, review: 0, minutes: 0, daysMet: 0, surplus: 0 })
   assert.deepEqual(stats.duolingo, { lessons: 0, minutes: 0, daysMet: 0 })
   assert.deepEqual(stats.runs, { count: 0, km: 0, points: [] })
-  assert.deepEqual(stats.rope, { sets: 0, sets90: 0, sets180: 0, seconds: 0 })
+  assert.deepEqual(stats.rope, { days: 0, count: 0, seconds: 0 })
   assert.deepEqual(stats.pullup, { sets: 0, seconds: 0 })
   assert.deepEqual(stats.plank, { sets: 0, seconds: 0 })
   assert.deepEqual(stats.equipment, { sets: 0, reps: 0, byName: [] })
@@ -72,7 +72,7 @@ await checkAsync('per-day completion, perfect days and stored flags', async () =
     meals: { breakfast: { at: 'x' }, lunch: { at: 'x' }, dinner: { at: 'x' } },
     vocab: { target: { new: 1, review: 0 }, sessions: [{ id: 'v', at: 'x', new: 1, review: 0, minutes: 5 }] },
     duolingo: [{ id: 'd', at: 'x', minutes: 5 }],
-    rope: [{ id: 'r', at: 'x', preset: 90, seconds: 40 }],
+    rope: [{ id: 'r', at: 'x', count: 90, seconds: 40 }],
   }))
   // A partly done day.
   await api.store.mutateDay(THU, day => ({ ...day, washes: { times: ['a'] } }))
@@ -163,7 +163,7 @@ await checkAsync('washing up counts once against its two-a-day goal', async () =
   assert.equal(wash.ratio, 0.5)
 })
 
-await checkAsync('training sums split by preset, load and heart rate', async () => {
+await checkAsync('training sums split by load and heart rate', async () => {
   const api = createHarness()
   await api.store.mutateDay(MON, day => ({
     ...day,
@@ -187,7 +187,9 @@ await checkAsync('training sums split by preset, load and heart rate', async () 
   assert.equal(stats.runs.km, 5)
   assert.equal(stats.runs.avgHr, 150)
   assert.deepEqual(stats.runs.points, [{ date: MON, pace: 6, avgHr: 150, km: 5, minutes: 30 }])
-  assert.deepEqual(stats.rope, { sets: 2, sets90: 1, sets180: 1, seconds: 140, avgHr: 130 })
+  // The legacy sets merge before summing: 90 + 180 jumps, 45 + 95 seconds,
+  // and (120×45 + 140×95) / 140 for the heart rate.
+  assert.deepEqual(stats.rope, { days: 1, count: 270, seconds: 140, tempo: 115.7, avgHr: 134 })
   assert.deepEqual(stats.pullup, { sets: 2, seconds: 50 })
   assert.deepEqual(stats.plank, { sets: 2, seconds: 105 })
   assert.equal(stats.equipment.sets, 5)
@@ -198,6 +200,18 @@ await checkAsync('training sums split by preset, load and heart rate', async () 
     { name: '卧推', weight: 40, sets: 1, reps: 8 },
     { name: '卧推', weight: 50, sets: 1, reps: 6 },
   ].sort((a, b) => b.reps - a.reps), 'one machine at another weight is its own entry, never merged')
+})
+
+await checkAsync('rope days and tempo are range totals, not means of means', async () => {
+  const api = createHarness()
+  await api.store.addSession(WED, 'rope', { at: 'x', count: 100, seconds: 60 })
+  await api.store.addSession(THU, 'rope', { at: 'x', count: 200, seconds: 120 })
+  const stats = buildStats(api.store, WED, THU, boundaryOf(api.config))
+  assert.equal(stats.rope.days, 2)
+  assert.equal(stats.rope.count, 300)
+  assert.equal(stats.rope.seconds, 180)
+  assert.equal(stats.rope.tempo, 100, '300 jumps over 3 minutes')
+  assert.equal(stats.rope.avgHr, undefined, 'neither day measured a heart rate')
 })
 
 await checkAsync('the pace curve keeps one point per qualifying run, in range order', async () => {

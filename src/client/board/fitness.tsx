@@ -1,12 +1,14 @@
 /**
  * The training tiles: running (single-valued, with derived pace), jump rope
- * (fixed-count sets), pull-ups (support time), plank (hold time), gym
- * equipment, and free-form sessions (a duration, plus optional energy).
+ * (single-valued, with a free count and derived tempo), pull-ups (support
+ * time), plank (hold time), gym equipment, and free-form sessions (a duration,
+ * plus optional energy).
  */
 import { useState, type JSX } from 'react'
-import type { EquipmentSession, FreeSession, PlankSession, PullupSession, RopeSession } from '../types.ts'
+import type { EquipmentSession, FreeSession, PlankSession, PullupSession } from '../types.ts'
+import { ropeTempo, type RopeDay } from '../../shared/rope.ts'
 import { FieldForm, type FieldSpec } from './fields.tsx'
-import { paceLabel, paceOf, timeField, timeOf, timeValueOf } from './format.ts'
+import { fractionText, paceLabel, paceOf, timeField, timeOf, timeValueOf } from './format.ts'
 import { SessionTile, type SessionEntry } from './session-cards.tsx'
 import { IconButton, Tile, TileHead } from './tile.tsx'
 
@@ -20,16 +22,15 @@ function runFields(defaultMinutes: number): readonly FieldSpec[] {
   ]
 }
 
-/** Fields for one jump-rope set. */
+/**
+ * Fields for one jump-rope day.
+ *
+ * The free count replaced the 90/180 preset pair, so the input is an ordinary
+ * positive integer like a run's distance — the user knows how many jumps they
+ * made; the app should not make them fit it into two boxes.
+ */
 const ROPE_FIELDS: readonly FieldSpec[] = [
-  {
-    name: 'preset',
-    label: '定数',
-    kind: 'select',
-    numericOptions: true,
-    defaultValue: '90',
-    options: [{ value: '90', label: '90' }, { value: '180', label: '180' }],
-  },
+  { name: 'count', label: '次数', kind: 'number', min: 1 },
   { name: 'seconds', label: '用时(秒)', kind: 'number', min: 1 },
   { name: 'avgHr', label: '心率', kind: 'number', min: 1, optional: true },
 ]
@@ -143,7 +144,7 @@ export function RunTile({ run, defaultMinutes, busy, onSet, onClear }: RunCardPr
   )
 }
 
-/** Handlers a session tile needs, shared by the three repetitive habits. */
+/** Handlers a session list needs, shared by the repetitive habits. */
 export interface SessionHandlers {
   readonly busy: boolean
   readonly onAdd: (payload: Record<string, unknown>) => void
@@ -151,19 +152,76 @@ export interface SessionHandlers {
   readonly onRemove: (id: string) => void
 }
 
-/** Jump rope: 90 or 180 count sets, any number a day. */
-export function RopeCard({ sessions, ...handlers }: SessionHandlers & { readonly sessions: readonly RopeSession[] }): JSX.Element {
+/** Props for the jump-rope tile. */
+export interface RopeTileProps {
+  /** The day's record, with any legacy sets already merged (see shared/rope.ts). */
+  readonly rope: RopeDay | null
+  readonly busy: boolean
+  readonly onSet: (payload: Record<string, unknown>) => void
+  readonly onClear: () => void
+}
+
+/**
+ * Jump rope: one record a day, like a run. The count is free — the old 90/180
+ * preset pair is gone — and the tile derives tempo from count and time, which
+ * is the pace-like figure that makes two different sessions comparable.
+ */
+export function RopeTile({ rope, busy, onSet, onClear }: RopeTileProps): JSX.Element {
+  const [editing, setEditing] = useState(false)
+  const tempo = rope === null ? undefined : ropeTempo(rope.count, rope.seconds)
+
   return (
-    <SessionTile
-      label="跳绳"
-      title="组数"
-      entries={sessions as readonly SessionEntry[]}
-      fields={ROPE_FIELDS}
-      summarize={entry => `${Number(entry.preset)} 定数 · ${Number(entry.seconds)}s${entry.avgHr === undefined ? '' : ` · ♥${Number(entry.avgHr)}`} · ${timeOf(String(entry.at ?? ''))}`}
-      addLabel="加一组"
-      emptyLabel="无记录"
-      {...handlers}
-    />
+    <Tile span={2} tone={rope === null ? 'idle' : 'done'}>
+      <TileHead
+        title="跳绳"
+        meta={rope === null ? '未记录' : `${rope.count} 个 · ${rope.seconds} 秒`}
+      >
+        {rope === null ? null : (
+          <>
+            <IconButton label="编辑" disabled={busy} onClick={() => setEditing(true)}>✎</IconButton>
+            <IconButton label="删除" disabled={busy} onClick={onClear}>×</IconButton>
+          </>
+        )}
+      </TileHead>
+
+      {editing ? (
+        <FieldForm
+          fields={[timeField(), ...ROPE_FIELDS]}
+          // Same rule as a new run: nothing to edit means the fields' own
+          // defaults (the clock) apply, rather than an empty `initial.time`
+          // winning over them and opening the form blank.
+          {...(rope === null
+            ? {}
+            : {
+                initial: {
+                  time: timeValueOf(rope.at),
+                  count: rope.count,
+                  seconds: rope.seconds,
+                  avgHr: rope.avgHr,
+                },
+              })}
+          submitLabel="保存"
+          busy={busy}
+          onSubmit={(payload) => {
+            onSet(payload)
+            setEditing(false)
+          }}
+          onCancel={() => setEditing(false)}
+        />
+      ) : rope === null ? (
+        <div className="pt-tile-foot">
+          <span className="pt-muted">任意次数，记用时与心率</span>
+          <span className="pt-grow" />
+          <button type="button" className="pt-primary" disabled={busy} onClick={() => setEditing(true)}>记录</button>
+        </div>
+      ) : (
+        <div className="pt-metrics">
+          {tempo === undefined ? null : <span>{fractionText(tempo)} 次/分</span>}
+          {rope.avgHr === undefined ? null : <span>♥ {rope.avgHr}</span>}
+          <span className="pt-muted">{timeOf(rope.at)}</span>
+        </div>
+      )}
+    </Tile>
   )
 }
 

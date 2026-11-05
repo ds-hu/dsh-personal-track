@@ -35,6 +35,36 @@ const vocabSession = z.object({
   minutes: z.number().nonnegative(),
 })
 
+/**
+ * One jump-rope record.
+ *
+ * New writes store one record a day with a free `count` (`seconds` is the time
+ * it took, `avgHr` what a watch measured). `preset` is the legacy shape — a
+ * fixed-count set of 90 or 180 jumps, several sets a day — and it stays in the
+ * schema so documents and backups written before the free count still parse;
+ * `src/shared/rope.ts` folds those sets into one record on read. A record must
+ * carry one of the two, so neither can disappear into a shapeless row.
+ *
+ * The domain version deliberately stays 2: this is an optional-field change,
+ * and `per-record` backends *discard* documents stamped with a version they do
+ * not accept — bumping would delete the history it is meant to preserve.
+ */
+const ropeSession = z.object({
+  id: sessionId,
+  at: z.string(),
+  /** Jumps in this record; the free count that replaced the preset pair. */
+  count: z.number().int().positive().optional(),
+  /** Legacy fixed-count set; read-only compatibility, never written anew. */
+  preset: z.union([z.literal(90), z.literal(180)]).optional(),
+  seconds: z.number().nonnegative(),
+  avgHr: z.number().int().positive().optional(),
+}).refine(session => session.count !== undefined || session.preset !== undefined, {
+  message: 'a rope record needs a count',
+})
+
+/** Repetitive sessions (jump rope); one record a day after the free count. */
+const ropeSessions = z.array(ropeSession).default([])
+
 /** Everything one habit day holds. Fields are optional/defaulted so older
  *  documents keep parsing as the schema grows. */
 export const dayRecord = z.object({
@@ -69,13 +99,7 @@ export const dayRecord = z.object({
     avgHr: z.number().int().positive().optional(),
   }).nullable().default(null),
   /** Repetitive sessions (jump rope). */
-  rope: z.array(z.object({
-    id: sessionId,
-    at: z.string(),
-    preset: z.union([z.literal(90), z.literal(180)]),
-    seconds: z.number().nonnegative(),
-    avgHr: z.number().int().positive().optional(),
-  })).default([]),
+  rope: ropeSessions,
   /** Repetitive sessions (pull-ups, metric = support time). */
   pullup: z.array(z.object({
     id: sessionId,

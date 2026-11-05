@@ -190,8 +190,9 @@ const sessionSchemas = {
   duolingo: z.object({ at: ISO.optional(), minutes: z.number().nonnegative() }),
   rope: z.object({
     at: ISO.optional(),
-    preset: z.union([z.literal(90), z.literal(180)]),
-    seconds: z.number().nonnegative(),
+    /** Jumps in the set — any positive number; the 90/180 presets are gone. */
+    count: z.number().int().positive(),
+    seconds: z.number().positive(),
     avgHr: z.number().int().positive().optional(),
   }),
   pullup: z.object({ at: ISO.optional(), seconds: z.number().nonnegative() }),

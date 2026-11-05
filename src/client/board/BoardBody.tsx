@@ -20,10 +20,11 @@ import {
   type TaskPatch,
 } from '../api.ts'
 import type { ClockView, StateView, VocabProgress } from '../types.ts'
+import { mergeRope } from '../../shared/rope.ts'
 import { CheckTile, LaundryTile, MealBoard } from './cards.tsx'
 import { Chip } from './Chip.tsx'
 import { DateNav } from './DateNav.tsx'
-import { EquipmentCard, FreeCard, PlankCard, PullupCard, RopeCard, RunTile } from './fitness.tsx'
+import { EquipmentCard, FreeCard, PlankCard, PullupCard, RopeTile, RunTile } from './fitness.tsx'
 import type { RegistryEntry } from './focus.ts'
 import { fractionText, messageOf } from './format.ts'
 import { MediaTile, TaskTile } from './registry.tsx'
@@ -219,6 +220,9 @@ export function BoardBody({
   const day = state?.day
   const record = day?.day ?? null
   const pending = state?.stock.pending ?? 0
+  // The day's rope as one record: new days already hold one, and a legacy
+  // document's sets are merged here so the tile edits the figure it shows.
+  const rope = record === null ? null : mergeRope(record.rope)
 
   const goTo = (target: string): void => {
     setDate(target)
@@ -358,7 +362,14 @@ export function BoardBody({
           }))}
           onClear={() => void act(() => client.clearRun(date))}
         />
-        <RopeCard sessions={record?.rope ?? []} {...sessionHandlers('rope')} />
+        <RopeTile
+          rope={rope}
+          busy={busy}
+          // One record a day: a write *is* the edit, so both the create button
+          // and the ✎ form land here, and the delete clears the day's record.
+          onSet={payload => void act(() => client.addSession(date, 'rope', payload))}
+          onClear={() => void act(() => client.removeSession(date, 'rope', rope?.id ?? ''))}
+        />
         <PullupCard sessions={record?.pullup ?? []} {...sessionHandlers('pullup')} />
         <PlankCard sessions={record?.plank ?? []} {...sessionHandlers('plank')} />
         <EquipmentCard sessions={record?.equipment ?? []} {...sessionHandlers('equipment')} />

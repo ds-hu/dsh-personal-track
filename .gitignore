@@ -7,3 +7,6 @@ lib/
 .pnpm-store/
 .tmp/
 *.tsbuildinfo
+
+# Screenshots and snapshots from the harness's own review tabs (clarity test)
+.clarity/

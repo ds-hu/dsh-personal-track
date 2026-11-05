@@ -38,12 +38,19 @@ import {
   type VocabProgress,
 } from './derive.ts'
 import { focusSeconds, withClosedSession, withOpenedSession } from '../shared/focus-session.ts'
+import { mergeRope } from '../shared/rope.ts'
 import type { DayKey } from '../shared/habit-day.ts'
 
 /** The laundry stock's key inside the counters table. */
 export const LAUNDRY_KEY = 'laundry'
 
-/** Session-bearing habits (running is single-valued and handled apart). */
+/**
+ * Session-bearing habits.
+ *
+ * Running is single-valued and has routes of its own. Jump rope is single-valued
+ * too, but it keeps the session routes: its record is the same shape and the
+ * store is where "one a day" is enforced, so a client cannot write two.
+ */
 export type SessionKind = 'vocab' | 'duolingo' | 'rope' | 'pullup' | 'plank' | 'equipment' | 'free' | 'washing'
 
 /** Everything the board needs about one habit day. */
@@ -169,8 +176,16 @@ export interface HabitStore {
    */
   removeCheck(key: DayKey, habit: CheckHabit, index?: number): Promise<DayRecord>
   setVocabTarget(key: DayKey, target: VocabTarget): Promise<DayRecord>
+  /**
+   * Append one session — except for **跳绳**, which is one record a day (the
+   * running shape): there a write replaces the day's record, legacy sets
+   * included. That is also how the board edits it, so there is one write path,
+   * not a create path and an edit path that can disagree.
+   */
   addSession(key: DayKey, kind: SessionKind, entry: Record<string, unknown>): Promise<DayRecord>
+  /** Merge a patch into one session; **跳绳** patches the merged day record. */
   patchSession(key: DayKey, kind: SessionKind, id: string, patch: Record<string, unknown>): Promise<DayRecord>
+  /** Remove one session; **跳绳** clears the whole day's single record. */
   removeSession(key: DayKey, kind: SessionKind, id: string): Promise<DayRecord>
   /** Stock down by `pieces` and one washing session appended. */
   wash(key: DayKey, pieces: number, at: string): Promise<{ day: DayRecord; stock: CounterRecord }>
@@ -592,18 +607,37 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
 
     addSession(key, kind, entry) {
       const id = randomUUID()
-      return store.mutateDay(key, day =>
-        withSessions(day, kind, key, [...sessionsOf(day, kind), { ...entry, id }]))
+      return store.mutateDay(key, (day) => {
+        // 跳绳 is one record a day, like a run: a write replaces the day's
+        // record instead of appending, so a legacy document's sets collapse
+        // into the one the board shows the moment it is edited.
+        if (kind === 'rope') return withSessions(day, kind, key, [{ ...entry, id }])
+        return withSessions(day, kind, key, [...sessionsOf(day, kind), { ...entry, id }])
+      })
     },
 
     patchSession(key, kind, id, patch) {
-      return store.mutateDay(key, day => withSessions(day, kind, key,
-        sessionsOf(day, kind).map(session => (session.id === id ? { ...session, ...patch, id } : session))))
+      return store.mutateDay(key, (day) => {
+        if (kind === 'rope') {
+          const merged = mergeRope(day.rope)
+          // Nothing recorded: a patch has no record to land on, and inventing
+          // one from a partial payload would store a fact nobody wrote.
+          if (merged === null) return withSessions(day, kind, key, [])
+          return withSessions(day, kind, key, [{ ...merged, ...patch, id: merged.id }])
+        }
+        return withSessions(day, kind, key,
+          sessionsOf(day, kind).map(session => (session.id === id ? { ...session, ...patch, id } : session)))
+      })
     },
 
     removeSession(key, kind, id) {
-      return store.mutateDay(key, day => withSessions(day, kind, key,
-        sessionsOf(day, kind).filter(session => session.id !== id)))
+      return store.mutateDay(key, (day) => {
+        // One record a day: deleting the row deletes the day's rope, including
+        // whatever legacy sets had been merged into the view.
+        if (kind === 'rope') return withSessions(day, kind, key, [])
+        return withSessions(day, kind, key,
+          sessionsOf(day, kind).filter(session => session.id !== id))
+      })
     },
 
     async wash(key, pieces, at) {

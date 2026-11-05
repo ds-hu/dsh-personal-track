@@ -10,7 +10,9 @@ import { useEffect, useMemo, useState, type JSX } from 'react'
 import type { HabitClient } from '../api.ts'
 import type { ClockView, RunPoint, StatsView } from '../types.ts'
 import { DataCard } from './data.tsx'
-import { mediaStatusLabel, messageOf, percentOf } from './format.ts'
+import { fractionText, mediaStatusLabel, messageOf, percentOf } from './format.ts'
+import { clusterRuns } from './run-curve.ts'
+import { ropeDurationText } from '../../shared/rope.ts'
 import { shiftDayKey } from '../../shared/habit-day.ts'
 import { Pills, Tile, TileHead } from './tile.tsx'
 
@@ -96,11 +98,34 @@ function HeatGrid({ stats }: { readonly stats: StatsView }): JSX.Element {
   )
 }
 
-/** The heart-rate / pace curve: one point per run that recorded both. */
+/**
+ * A bucket's shade: the buckets that are present spread over the whole ramp, so
+ * three of them read as pale / middle / deep rather than as three neighbours of
+ * one end. The ramp is `--pt-curve-1` (palest, shortest) to `--pt-curve-5` in
+ * the stylesheet, translucent green like the rest of the palette — which is what
+ * lets it sit on a light and a dark shell without a second set of values.
+ */
+function shadeOf(index: number, count: number): string {
+  const step = count <= 1 ? 4 : Math.round(index / (count - 1) * 4)
+  return `var(--pt-curve-${step + 1})`
+}
+
+/**
+ * The heart-rate / pace curve: one point per run that recorded both, bucketed by
+ * distance and never joined across buckets.
+ *
+ * There is no line through the runs themselves any more. A run is a point with
+ * two coordinates and a date that is not one of them, so joining consecutive
+ * dates drew a relationship between runs that share nothing but being a week
+ * apart. The only line left has a meaning: inside one distance bucket, the runs
+ * nothing faster beats.
+ */
 function Curve({ points }: { readonly points: readonly RunPoint[] }): JSX.Element {
   if (points.length === 0) {
     return <span className="pt-muted">这段时间没有同时记录了里程与心率的跑步</span>
   }
+  const clusters = clusterRuns(points)
+  const shade = new Map(clusters.map((cluster, index) => [cluster.key, shadeOf(index, clusters.length)]))
   const width = 320
   const height = 170
   const pad = 30
@@ -116,33 +141,67 @@ function Curve({ points }: { readonly points: readonly RunPoint[] }): JSX.Elemen
     pad + (maxPace === minPace ? 0.5 : (maxPace - pace) / (maxPace - minPace)) * (width - pad * 2)
   const y = (hr: number): number =>
     height - pad - (maxHr === minHr ? 0.5 : (hr - minHr) / (maxHr - minHr)) * (height - pad * 2)
-  const path = points
-    .map((point, index) => `${index === 0 ? 'M' : 'L'}${x(point.pace).toFixed(1)},${y(point.avgHr).toFixed(1)}`)
-    .join(' ')
+  const at = (point: RunPoint): string =>
+    `${x(point.pace).toFixed(1)},${y(point.avgHr).toFixed(1)}`
+  const path = (frontier: readonly RunPoint[]): string =>
+    frontier.map((point, index) => `${index === 0 ? 'M' : 'L'}${at(point)}`).join(' ')
   const fmt = (value: number): string => value.toFixed(1)
 
   return (
-    <svg className="pt-curve" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="心率-配速曲线">
-      <line className="pt-curve-axis" x1={pad} y1={height - pad} x2={width - pad} y2={height - pad} />
-      <line className="pt-curve-axis" x1={pad} y1={pad} x2={pad} y2={height - pad} />
-      <path className="pt-curve-line" d={path} />
-      {points.map(point => (
-        <circle
-          key={point.date}
-          className="pt-curve-dot"
-          cx={x(point.pace)}
-          cy={y(point.avgHr)}
-          r={3}
-        >
-          <title>{`${point.date} · ${fmt(point.pace)} 分/km · ♥${point.avgHr} · ${point.km}km`}</title>
-        </circle>
-      ))}
-      <text className="pt-curve-tick" x={width / 2} y={height - 6} textAnchor="middle">配速（越右越快）</text>
-      <text className="pt-curve-tick" x={pad - 4} y={pad + 4} textAnchor="end">♥{maxHr}</text>
-      <text className="pt-curve-tick" x={pad - 4} y={height - pad} textAnchor="end">♥{minHr}</text>
-      <text className="pt-curve-tick" x={pad} y={height - pad + 12}>{fmt(maxPace)}</text>
-      <text className="pt-curve-tick" x={width - pad} y={height - pad + 12} textAnchor="end">{fmt(minPace)}</text>
-    </svg>
+    <>
+      <svg className="pt-curve" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="心率-配速散点，按里程分色">
+        <line className="pt-curve-axis" x1={pad} y1={height - pad} x2={width - pad} y2={height - pad} />
+        <line className="pt-curve-axis" x1={pad} y1={pad} x2={pad} y2={height - pad} />
+        {clusters.map(cluster => cluster.frontier.length < 2 ? null : (
+          <path
+            key={`front:${cluster.key}`}
+            className="pt-curve-front"
+            d={path(cluster.frontier)}
+            style={{ stroke: shade.get(cluster.key) }}
+          />
+        ))}
+        {clusters.flatMap(cluster => cluster.points.map(point => (
+          <circle
+            key={point.date}
+            cx={x(point.pace)}
+            cy={y(point.avgHr)}
+            r={3.4}
+            // An inline style, not a `fill` attribute: the attribute loses to any
+            // stylesheet rule for the element, and a `.pt-curve-dot { fill }`
+            // rule is exactly what flattened this ramp into one green once.
+            style={{ fill: shade.get(cluster.key) }}
+          >
+            <title>{`${point.date} · ${point.km} km · ${fmt(point.pace)} 分/km · ♥${point.avgHr}`}</title>
+          </circle>
+        )))}
+        {clusters.flatMap(cluster => cluster.frontier.map(point => (
+          <circle
+            key={`flag:${point.date}`}
+            className="pt-curve-flag"
+            cx={x(point.pace)}
+            cy={y(point.avgHr)}
+            r={5.5}
+            style={{ stroke: shade.get(cluster.key) }}
+          />
+        )))}
+        <text className="pt-curve-tick" x={width / 2} y={height - 6} textAnchor="middle">配速（越右越快）</text>
+        <text className="pt-curve-tick" x={pad - 4} y={pad + 4} textAnchor="end">♥{maxHr}</text>
+        <text className="pt-curve-tick" x={pad - 4} y={height - pad} textAnchor="end">♥{minHr}</text>
+        <text className="pt-curve-tick" x={pad} y={height - pad + 12}>{fmt(maxPace)}</text>
+        <text className="pt-curve-tick" x={width - pad} y={height - pad + 12} textAnchor="end">{fmt(minPace)}</text>
+      </svg>
+      {clusters.length < 2 ? null : (
+        <div className="pt-curve-legend">
+          {clusters.map(cluster => (
+            <span className="pt-curve-key" key={`key:${cluster.key}`}>
+              <i style={{ background: shade.get(cluster.key) }} />
+              {cluster.key} km · {cluster.points.length} 次
+            </span>
+          ))}
+          <span className="pt-curve-key"><span className="pt-curve-key-dash" />前沿</span>
+        </div>
+      )}
+    </>
   )
 }
 
@@ -257,9 +316,12 @@ export function StatsPanel({ client }: StatsPanelProps): JSX.Element {
                 ['平均心率', stats.runs.avgHr === undefined ? '——' : `${stats.runs.avgHr}`],
               ]} />
               <MetricCard title="跳绳" rows={[
-                ['组数', `${stats.rope.sets}`],
-                ['90 / 180 定数', `${stats.rope.sets90} / ${stats.rope.sets180}`],
-                ['总时长', `${stats.rope.seconds} 秒`],
+                ['记录天数', `${stats.rope.days}`],
+                ['总次数', `${stats.rope.count}`],
+                ['总时长', ropeDurationText(stats.rope.seconds)],
+                // One rate over the range's totals: averaging per-record rates
+                // would let a 2-minute sprint outweigh a 20-minute session.
+                ['平均节奏', stats.rope.tempo === undefined ? '——' : `${fractionText(stats.rope.tempo)} 次/分`],
                 ['平均心率', stats.rope.avgHr === undefined ? '——' : `${stats.rope.avgHr}`],
               ]} />
               <MetricCard title="引体向上" rows={[

@@ -170,9 +170,11 @@ await checkAsync('an unknown session kind is refused by name', async () => {
   assert.equal(response.status, 400)
   assert.match((response.body as ErrorBody).error.message, /unknown session kind/)
 
-  // A known kind with a wrong entry fails the per-kind schema instead.
+  // A known kind with a wrong entry fails the per-kind schema instead. A
+  // preset-only rope entry is now one of those: the free count replaced the
+  // 90/180 pair, so `preset` is not a writable field any more.
   const wrongEntry = await api.call('POST', '/session', {
-    date: DATE, kind: 'rope', entry: { preset: 45, seconds: 10 },
+    date: DATE, kind: 'rope', entry: { preset: 90, seconds: 10 },
   })
   assert.equal(wrongEntry.status, 400)
   assert.match((wrongEntry.body as ErrorBody).error.message, /session rope/)
@@ -183,7 +185,7 @@ await checkAsync('every session kind lands in its own array and moves the derive
   // Exactly the configured default target, so the weighted ratio is exactly 1.
   await api.state('POST', '/session', { date: DATE, kind: 'vocab', entry: { new: 20, review: 60, minutes: 30 } })
   await api.state('POST', '/session', { date: DATE, kind: 'duolingo', entry: { minutes: 12 } })
-  await api.state('POST', '/session', { date: DATE, kind: 'rope', entry: { preset: 90, seconds: 45 } })
+  await api.state('POST', '/session', { date: DATE, kind: 'rope', entry: { count: 90, seconds: 45 } })
   await api.state('POST', '/session', { date: DATE, kind: 'pullup', entry: { seconds: 30 } })
   await api.state('POST', '/session', { date: DATE, kind: 'plank', entry: { seconds: 60 } })
   await api.state('POST', '/session', { date: DATE, kind: 'equipment', entry: { name: '划船机', reps: 20, weight: 40 } })
@@ -203,6 +205,45 @@ await checkAsync('every session kind lands in its own array and moves the derive
   assert.equal(cells.find(cell => cell.id === 'duolingo')?.value, 1)
   assert.equal(cells.find(cell => cell.id === 'sport')?.value, 1, 'any training fills 健身')
   assert.equal((state.day as { progress: { done: number } }).progress.done, 3, 'and nothing else was earned')
+})
+
+await checkAsync('jump rope is one record a day, and a second write replaces it', async () => {
+  const api = createHarness()
+  await api.state('POST', '/session', { date: DATE, kind: 'rope', entry: { count: 90, seconds: 45 } })
+  const second = await api.state('POST', '/session', {
+    date: DATE, kind: 'rope', entry: { count: 180, seconds: 90, avgHr: 140 },
+  })
+  const rope = (second.day as {
+    day: { rope: readonly { count?: number; seconds: number; avgHr?: number }[] }
+  }).day.rope
+  assert.equal(rope.length, 1, 'the day holds one record, like a run')
+  assert.equal(rope[0]!.count, 180)
+  assert.equal(rope[0]!.seconds, 90)
+  assert.equal(rope[0]!.avgHr, 140)
+})
+
+await checkAsync('a legacy rope set list still reads, and the statistics merge it', async () => {
+  const api = createHarness()
+  await api.store.mutateDay(DATE, day => ({
+    ...day,
+    rope: [
+      { id: 'r1', at: `${DATE}T09:00:00`, preset: 90, seconds: 60, avgHr: 120 },
+      { id: 'r2', at: `${DATE}T10:00:00`, preset: 180, seconds: 120 },
+    ],
+  }))
+  const state = await api.state('GET', `/state?date=${DATE}`)
+  const rope = (state.day as {
+    day: { rope: readonly { preset?: number }[] }
+  }).day.rope
+  assert.equal(rope.length, 2, 'the document keeps the shape it was written with')
+  assert.equal(rope[0]!.preset, 90)
+
+  const stats = await api.state('GET', `/stats?from=${DATE}&to=${DATE}`)
+  assert.deepEqual(
+    stats.rope,
+    { days: 1, count: 270, seconds: 180, tempo: 90, avgHr: 120 },
+    'both shapes answer one merged figure',
+  )
 })
 
 await checkAsync('a free session needs a duration and may omit its energy', async () => {

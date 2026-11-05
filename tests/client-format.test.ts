@@ -172,7 +172,7 @@ const reportState: StateView = {
         sessions: [{ id: 'v1', at: '2026-09-20T07:12:00', new: 5, review: 30, minutes: 45 }],
       },
       duolingo: [{ id: 'd1', at: '2026-09-20T09:00:00', minutes: 25 }],
-      rope: [{ id: 'r1', at: '2026-09-20T10:00:00', preset: 90, seconds: 60 }],
+      rope: [{ id: 'r1', at: '2026-09-20T10:00:00', count: 1200, seconds: 600, avgHr: 135 }],
       pullup: [
         { id: 'u1', at: '2026-09-20T10:20:00', seconds: 40 },
         { id: 'u2', at: '2026-09-20T10:25:00', seconds: 35 },
@@ -239,7 +239,7 @@ check('each group is one line, with the details it used to drop', () => {
   assert.ok(reportText.includes('三餐 早 ¥12 · 午 ¥24.5 · 晚 —（共 ¥36.5）'), 'every slot is named, missing one included')
   assert.ok(reportText.includes('背单词 55%（新 5/20 · 复 30/60 · 45 分） · 多邻国 1 节 25 分'))
   assert.ok(reportText.includes(`跑步 5km 30 分 6'00"/km ♥156`))
-  assert.ok(reportText.includes('跳绳 1 组（90×1）'))
+  assert.ok(reportText.includes('跳绳 1200 个 10 分 120 次/分 ♥135'))
   assert.ok(reportText.includes('引体 3 组（40+35+30 秒）'), 'every set shows its own support time')
   assert.ok(reportText.includes('平板 2 组（60+45 秒）'), 'every hold shows its own seconds')
   assert.ok(
@@ -251,14 +251,38 @@ check('each group is one line, with the details it used to drop', () => {
     'every free session shows its own minutes, and a partial burn total says so',
   )
 })
-check('tasks: every unfinished task is named, one Markdown list item each', () => {
+check('a legacy rope set list merges into the same figure', () => {
+  const legacy: StateView = {
+    ...reportState,
+    day: {
+      ...reportState.day,
+      day: {
+        ...reportState.day.day!,
+        rope: [
+          { id: 'r1', at: '2026-09-20T09:00:00', preset: 90, seconds: 60 },
+          { id: 'r2', at: '2026-09-20T10:00:00', preset: 180, seconds: 120, avgHr: 140 },
+        ],
+      },
+    },
+  }
   assert.ok(
-    reportText.includes('剩余任务：\n\n- 交房租（逾期）\n- 英语口语（英听说 A） 2/5\n- 高数作业 0/1（9-24）'),
+    dayReport(legacy, reportClock).includes('跳绳 270 个 3 分 90 次/分 ♥140'),
+    'an old document reads as one record, not as a list of sets',
+  )
+})
+check('tasks: unfinished and today-or-later finished, each with its deadline', () => {
+  assert.ok(
+    reportText.includes(
+      '任务：\n\n- 交房租（9-15 逾期）\n- 英语口语（英听说 A） 2/5（9-20）\n- 高数作业 0/1（9-24）\n- 读书笔记 3/3（9-20） ✓',
+    ),
     reportText,
   )
-  assert.ok(!reportText.includes('读书笔记'), 'a finished task is not remaining')
+  assert.ok(
+    !reportText.includes('剩余任务'),
+    'the list is no longer remaining-only, so the heading must not claim it is',
+  )
 })
-check('the remaining-task list reads in the board\'s order: deadline ascending, undated last', () => {
+check('the task list reads in the board\'s order: deadline ascending, undated last', () => {
   // Handed over shuffled — what the report must not do is echo the arrival
   // order, which is neither the tile's nor "most urgent first".
   const shuffled: StateView = {
@@ -272,17 +296,35 @@ check('the remaining-task list reads in the board\'s order: deadline ascending, 
       taskOf({ id: 't1', title: '英语口语', category: '英听说 A', due: '2026-09-20', progress: { current: 2, total: 5 }, checkpoints: [], createdAt: '2026-09-18T10:00:00', state: 'doing', overdue: false }),
     ],
   }
-  const tail = dayReport(shuffled, reportClock).split('剩余任务：\n\n')[1]
+  const tail = dayReport(shuffled, reportClock).split('任务：\n\n')[1]
   assert.equal(
     tail,
     [
-      '- 交房租（逾期）',
-      '- 英语口语（英听说 A） 2/5',
+      '- 交房租（9-15 逾期）',
+      '- 英语口语（英听说 A） 2/5（9-20）',
       '- 高数作业 0/1（9-24）',
       '- 买菜',
       '- 修台灯',
+      '- 读书笔记 3/3（9-20） ✓',
     ].join('\n'),
-    'due soonest first, undated last (newest first among them)',
+    'due soonest first, undated last (newest first among them); finished sink to the bottom',
+  )
+})
+check('a finished task is listed only while its deadline is today or later', () => {
+  const state: StateView = {
+    ...reportState,
+    tasks: [
+      taskOf({ id: 'a', title: '今天的作业', due: '2026-09-20', progress: { current: 4, total: 4 }, checkpoints: [], createdAt: '2026-09-18T10:00:00', completedAt: '2026-09-20T18:00:00', state: 'done', overdue: false }),
+      taskOf({ id: 'b', title: '下周的作业', due: '2026-09-26', progress: { current: 2, total: 2 }, checkpoints: [], createdAt: '2026-09-18T10:00:00', completedAt: '2026-09-19T18:00:00', state: 'done', overdue: false }),
+      taskOf({ id: 'c', title: '上周的作业', due: '2026-09-12', progress: { current: 1, total: 1 }, checkpoints: [], createdAt: '2026-09-10T10:00:00', completedAt: '2026-09-13T18:00:00', state: 'done', overdue: false }),
+      taskOf({ id: 'd', title: '没有截止的', progress: { current: 1 }, checkpoints: [], createdAt: '2026-09-10T10:00:00', completedAt: '2026-09-11T18:00:00', state: 'done', overdue: false }),
+    ],
+  }
+  const tail = dayReport(state, reportClock).split('任务：\n\n')[1]
+  assert.equal(
+    tail,
+    '- 今天的作业 4/4（9-20） ✓\n- 下周的作业 2/2（9-26） ✓',
+    'an archived or undated finished task says nothing about the day being reported',
   )
 })
 check('an empty day still reports its zeros, and keeps every group line', () => {
@@ -305,7 +347,7 @@ check('an empty day still reports its zeros, and keeps every group line', () => 
   assert.ok(bare.includes('三餐 早 — · 午 — · 晚 —'), 'the slots are named even when empty')
   assert.ok(bare.includes('健身 —'), 'a rest day keeps its line instead of vanishing')
   assert.ok(!bare.includes('跑步'))
-  assert.ok(!bare.includes('剩余任务'), 'nothing open, no remaining-task line')
+  assert.ok(!bare.includes('任务：'), 'nothing to list, no task section')
 })
 
 console.log('checkpoint lines (a task\'s stages in the editor)')

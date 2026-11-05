@@ -110,7 +110,7 @@ await checkAsync('adding a session does not disturb its own target snapshot', as
 await checkAsync('each session kind has its own array', async () => {
   const { store } = storeAt()
   await store.addSession(DATE, 'duolingo', { at: 'x', minutes: 5 })
-  await store.addSession(DATE, 'rope', { at: 'x', preset: 90, seconds: 30 })
+  await store.addSession(DATE, 'rope', { at: 'x', count: 90, seconds: 30 })
   await store.addSession(DATE, 'pullup', { at: 'x', seconds: 20 })
   await store.addSession(DATE, 'plank', { at: 'x', seconds: 45 })
   await store.addSession(DATE, 'equipment', { at: 'x', name: '划船机', reps: 10 })
@@ -126,6 +126,38 @@ await checkAsync('each session kind has its own array', async () => {
   assert.equal(day.free[0]!.minutes, 40)
   assert.equal(day.free[0]!.kcal, 300)
   assert.equal(day.washing.length, 1)
+})
+
+await checkAsync('jump rope is one record a day: a second write replaces the first', async () => {
+  const { store } = storeAt()
+  await store.addSession(DATE, 'rope', { at: '2026-09-16T09:00:00', count: 90, seconds: 45 })
+  await store.addSession(DATE, 'rope', { at: '2026-09-16T10:00:00', count: 200, seconds: 90 })
+  const day = store.readDay(DATE)!
+  assert.equal(day.rope.length, 1, 'a day holds one rope record, not a list of sets')
+  assert.equal(day.rope[0]!.count, 200)
+  assert.equal(day.rope[0]!.seconds, 90)
+})
+
+await checkAsync('a legacy set list is merged when the day is patched or cleared', async () => {
+  const { store } = storeAt()
+  await store.mutateDay(DATE, day => ({
+    ...day,
+    rope: [
+      { id: 'r1', at: '2026-09-16T09:00:00', preset: 90, seconds: 60, avgHr: 120 },
+      { id: 'r2', at: '2026-09-16T10:00:00', preset: 180, seconds: 120, avgHr: 150 },
+    ],
+  }))
+
+  // The board edits the record it shows, which is the merged one; the write
+  // normalizes the day instead of silently patching one of the old sets.
+  const patched = await store.patchSession(DATE, 'rope', 'r1', { count: 300 })
+  assert.equal(patched.rope.length, 1)
+  assert.equal(patched.rope[0]!.count, 300)
+  assert.equal(patched.rope[0]!.seconds, 180, 'the merged duration survives')
+  assert.equal(patched.rope[0]!.avgHr, 140)
+
+  const cleared = await store.removeSession(DATE, 'rope', 'r1')
+  assert.deepEqual(cleared.rope, [], 'the row deletes the day, not one legacy set')
 })
 
 await checkAsync('a free session keeps its duration when the energy is patched in later', async () => {
