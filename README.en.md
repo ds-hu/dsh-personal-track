@@ -1,7 +1,7 @@
 # personal-track
 
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
-[![version](https://img.shields.io/badge/version-0.4.0-blue.svg)](./CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.5.0-blue.svg)](./CHANGELOG.md)
 [![tests](https://img.shields.io/badge/tests-pnpm%20test-informational.svg)](./AGENTS.md#commands)
 [![DSH plugin](https://img.shields.io/badge/DSH-plugin-6b4bd6.svg)](https://github.com/deepseek-ai/deepseek-harness)
 [![platform](https://img.shields.io/badge/platform-web-46aeb0.svg)](#install)
