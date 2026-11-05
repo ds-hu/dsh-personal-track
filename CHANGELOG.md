@@ -39,8 +39,18 @@
 
 ### 内部
 
-- 新增 `src/shared/rope.ts`：`count` / `preset` 的读取、一天多组的合并、节奏与时长格式，两半身共用；
-  `rope[].preset` 留在域 schema 里作**遗留**字段，写入只接受 `count`（`session rope` 校验）。
+- **README 重写成用户文档，工具链规则搬进新文件 `AGENTS.md`**：README 从 345 行降到 120 行，
+  只留定位、截图、能力表、安装（三种方式 + 四个配置字段）、数据与备份、开发命令、结构；
+  「工具链注意事项（都踩过）」整段移进 `AGENTS.md`，并按命令 / 两个半身 / 依赖 / 文案 / 域 /
+  UI / 验证口径 / 发布分组重写，加了一条「推荐 fork 后让 agent 改」的用法说明
+  ——可配置面故意小，是因为枚举开关永远列不全，改代码才是这条路。
+- **新增 `README.en.md`**：与中文版章节一一对应、互链；两版都带 badge（license / version /
+  tests / DSH 插件 / web 平台）。
+- **三张截图来自真实代码**：`.tmp/shots` 里用 esbuild 把 `TrackPanel` 打进浏览器，配一套固定
+  fixture 与一个读真实词典的 locale 假服务，由 Playwright 点击「统计」「近 30 天」和一条任务标题
+  拍下看板 / 统计 / 专注模式——不是画的 mock，所以布局与样式就是实现本身。
+- 新增 `src/shared/rope.ts`：`count` / `preset` 的读取、一天多组的合并、节奏与时长（`ropeDurationOf`），
+  两半身共用；`rope[].preset` 留在域 schema 里作**遗留**字段，写入只接受 `count`（`session rope` 校验）。
 - `POST /session`（`kind=rope`）从追加改为「设置这一天」：store 的 add / patch / remove 都把一天的
   跳绳归一成一条，客户端的新建与编辑因此只有一条写路径，旧组的归并在同一次写入里完成。
 - 新增 `tests/rope.test.ts` 覆盖合并规则；store / stats / api / report 的旧夹具同步。

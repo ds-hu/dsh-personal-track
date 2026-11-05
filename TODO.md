@@ -7,7 +7,7 @@
 
 | # | 事项 | 状态 |
 |---|---|---|
-| 1 | README 重写 + badge/截图 + 中文版 + `AGENTS.md` | ⬜ |
+| 1 | README 重写 + badge/截图 + 中文版 + `AGENTS.md` | ✅ 本轮 |
 | 2 | i18n 完善 | ✅ 本轮 |
 | 3 | 跳绳：去掉强制 90/180 定数，向跑步看齐 | ✅ |
 | 4 | 跑步：曲线按里程聚类分色，Pareto Frontier 虚线 | ✅ 本轮 |
@@ -211,3 +211,21 @@
   注入验证（两次）：往 `Chip.tsx` 塞一个中文 `title` → 守卫 exit 1；从英文词典删掉 `panel.title` →
   第二条守卫 exit 1（须先 rebuild，守卫读产物）；恢复后 sha256 均与注入前一致。
 - **已知边界**：英文没有复数机制（"1 entries"）；条目多到 6 档以上时曲线会出现相邻两档共色（第 3 轮已说明）。
+
+## 第 5 轮结果（1）
+
+- **README 345 → 120 行**：只留定位、三张截图、能力表、安装（三种方式 + 四个配置字段）、
+  数据与备份、开发命令、结构；「工具链注意事项（都踩过）」整段搬走。章节从 9 个降到 6 个。
+- **`AGENTS.md`（107 行）**：命令、两个半身的两套重载规则、依赖与模块身份、文案（唯一来源）、
+  域与数据、UI 与样式、验证口径、提交与发布。不再按"踩坑顺序"排列，改按"做错会静默出问题"分组。
+- **`README.en.md`**：与中文版章节一一对齐、互链；两版都带五枚 badge（license / version /
+  tests / DSH 插件 / web 平台）。version 与 `package.json` 对齐在 0.4.0（这一轮的改动仍在 Unreleased）。
+- **截图不是 mock**：`.tmp/shots` 用 esbuild 把真实的 `TrackPanel` 与 `styles.ts` 打进浏览器，
+  配一套固定 fixture 和一个读真实词典的 locale 假服务，Playwright 点「统计」「近 30 天」与一条任务标题，
+  拍出 `docs/images/{board,stats,focus}.png`。布局与配色就是实现本身，唯一"假"的是数据。
+  这台机器上没有 `react-dom`，所以给 `.tmp/shots` 单独装了一份（`npm --prefix`，不进仓库）。
+- **验收**：README 120 行且不含工具链段落；两版章节对齐；`docs/images/` 三张图能被 README 引用；
+  改的都是 Markdown，代码与产物未动，测试与 verify 结论沿用上一轮（18/18 + 三套 tsc + 两个 verify）。
+- **顺带发现**：这台机器上 `pnpm verify` 会先撞 store 位置不一致
+  （`node_modules` 链接自 `D:\Projects\personal-track\.pnpm-store`，仓库已改名为 `dsh-personal-track`），
+  所以这一轮的验证是逐条跑 `node scripts/*.mjs` 的。要恢复 `pnpm <script>` 得先重装一次依赖。

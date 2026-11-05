@@ -1,345 +1,120 @@
 # personal-track
 
-包名 `@ds-hu/personal-track`。Plugins 面板里叫 **个人习惯追踪**（英文 Personal Track），
-图标是根目录的 `icon.svg`（完成度环，与看板顶部那个同源），标题与一句话说明来自 `locale/`。
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![version](https://img.shields.io/badge/version-0.4.0-blue.svg)](./CHANGELOG.md)
+[![tests](https://img.shields.io/badge/tests-pnpm%20test-informational.svg)](./AGENTS.md#命令)
+[![DSH plugin](https://img.shields.io/badge/DSH-plugin-6b4bd6.svg)](https://github.com/deepseek-ai/deepseek-harness)
+[![platform](https://img.shields.io/badge/platform-web-46aeb0.svg)](#安装)
 
-DeepSeek Harness（DSH）插件：**一个主面板「习惯看板」**，内含**打卡视图**（专注栏 + 当日看板）与**统计视图**，以及针对单个任务/影视书籍的**专注模式**（全屏 + 笔记 + 长图素材）。
+**中文** · [English](./README.en.md)
 
-- 领域语言：[CONTEXT.md](./CONTEXT.md) —— 五形态（打卡/计数器/槽位/会话/登记）、习惯日与夜段、目标、格、任务进度、专注会话与素材
-- 决策记录：[docs/adr/](./docs/adr/) —— 传输选型、状态派生不落库、图片存域内 base64
-- 变更记录：[CHANGELOG.md](./CHANGELOG.md) —— 每个版本的新增 / 变更 / 移除 / 修正
-- 上游插件开发文档快照：`.dsh-docs/`（git 忽略）
+给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 写的一个习惯看板：一个主面板，
+左手边**专注栏**，中间**当日打卡**与**统计**；点开任务或影视书籍就是全屏的**专注模式**（笔记 + 素材）。界面跟随外壳语言（中文 / English），切换即时生效。
 
-## 功能
+![看板](./docs/images/board.png)
 
-| 分组 | 习惯 | 形态与交互 |
-|---|---|---|
-| 日常 | 洗漱 ×2、洗澡 ×1、洗衣 | 打卡：空槽是一个虚线 `＋`，记一条就多一个可改可删的时间块，记满即不再出现按钮；洗衣是**存量 + 洗涤会话**：±1 与"修正"只调存量不留记录，"洗完"记下件数与时点 |
-| 饮食 | 早饭/午饭/晚饭 | 三行紧凑排布：点 `＋` 即盖时间戳，✎ 改时间与价格，× 清除 |
-| 学习 | 背单词、多邻国 | 背单词按当日目标（新词/复习）计进度、可改目标、超额单列；多邻国任意节数 |
-| 健身 | 跑步、跳绳、引体向上、平板支撑、健身器材、自由锻炼 | 跑步每日至多一次并显示派生配速；跳绳每日一条、次数自由并显示派生节奏；引体与平板记时长；器材记名称/动作数/重量；**自由锻炼**记时长与可选消耗热量。任一项有记录，当日的**健身格**即满 |
-| 记录 | 影视书籍、任务作业 | 跨日保留的状态登记：媒体三态 + 5 星评分；任务进度 → 三态派生 + 逾期，一键完成；**点击标题或 ⤢ 进入专注模式** |
+| 打卡 | 统计 |
+|---|---|
+| ![统计](./docs/images/stats.png) | ![专注](./docs/images/focus.png) |
 
-**专注模式**是这次的核心新增：点任务/影视书籍的标题（或它右边的 ⤢）进入全屏工作面——左侧是名称、学科、截止、**专注时长**（累计时长在悬停里）与**笔记**，右上是一条细工具条（进度条可拖、可 ±、检查点可点，加「屏幕全屏」「退出专注」两个按钮），右下是**素材**流。进入即开始一段**专注会话**，退出即结束（刷新或关标签页时也尽力闭合）；时长只由起止时刻派生，进程崩溃留下的未闭合会话不计。弹窗是**不透明**的整屏：它盖住的正是看板本身，半透明会让底下的内容一直可读；配色取外壳自己的主题令牌（`--dsw-alias-bg-base` / `--dsw-alias-label-primary`），深浅由 `body[data-ds-dark-theme]` 判定，不读系统偏好。
+## 它管什么
 
-**素材 = 文本块（Markdown）+ 图片**，按加入顺序混排：`＋ 文本` 加一块 Markdown（标题/列表/引用/代码/行内样式，自己解析、零依赖、不经过 HTML 注入），`添加图片…`、直接 Ctrl+V 粘贴或拖入图片即可成为素材。长图默认整页适应，点一下切到原始尺寸（可滚动）；单张上限 10 MB。
+| 分组 | 内容 |
+|---|---|
+| 日常 | 洗漱 ×2、洗澡、洗衣（存量 ±1 与「洗完」会话分开记） |
+| 饮食 | 早饭 / 午饭 / 晚饭：点一下盖时间戳，可改时间与价格 |
+| 学习 | 背单词（按当日目标、加权进度，复习词按 1/5 计）、多邻国（任意节数） |
+| 健身 | 跑步（配速派生）、跳绳（次数自由、节奏派生）、引体向上、平板支撑、健身器材、自由锻炼 |
+| 记录 | 影视书籍（三态 + 评分）、任务（进度 → 三态 + 逾期，可拖进度条，带检查点） |
 
-**专注栏**常驻打卡视图左侧：有专注会话时显示**最近一段**所属条目的卡片（那一段的时刻与时长、累计专注、「继续专注」），一段都没有时显示时钟、习惯日与当日完成摘要。卡片是**派生**的——取全部任务/影视书籍里已闭合会话中开始最晚的那一段，不存、不记浏览器本地，所以刷新、换标签页、删掉条目之后它都与历史一致；也因此它没有 ×，换一张的办法是去专注别的条目。窄屏（≤720px）下不显示这一栏——它没地方待在**看板**旁边，只会把看板往下推；专注模式改从看板任意条目进入。
+**完成条是分数的，不是复选框**：九个习惯格之外，当日到期的任务各占一格，所以读数是 `5.3/10` 这样的小数；
+每格按自己的分数渐变填绿，悬停给出百分比。「健身」是**存在格**——任一训练有记录就填满，所以休息日读 `8/9`。
 
+**专注模式**是整屏的不透明工作面：左侧名称/截止/累计专注/笔记，右上一条细工具条（进度条可拖、可 ±、
+检查点可点），右下是**素材**流（Markdown 文本块 + 图片，粘贴或拖入即加）。进即开始一段**专注会话**，出即结束；
+时长只由起止时刻派生，崩掉的未闭合会话不计。
 
-两处**初值**是替你算好的：新增会话（背单词 / 多邻国 / 健身 / 自由锻炼 / 洗衣）的**时间默认当前时刻**
-（正是宿主本会盖上的那个值，改一下即可补录）；新建任务的**截止默认本周末**
-（周一为一周之始，即当前习惯日所在周的周日），仍是可改可清空的普通日期字段。
+**专注栏**是派生的：显示全部条目里已闭合会话中开始最晚的那一段，不存、不记浏览器本地，
+所以刷新、换标签页、删掉条目之后它都与历史一致；它也没有 ×——换一张的办法是去专注别的条目。
 
-**完成条是分数的，不是复选框。** 9 个习惯格（洗漱 2、洗澡 1、三餐 3、背单词 1、多邻国 1、健身 1）之外，
-**当日到期的任务各占一格**，所以读数是 `5.3/10` 这样的形式：背单词那格填的是加权目标进度
-（做了一半就是半格），任务那格填的是 `当前/目标量`。每个小方格按自己的分数**渐变填绿**，
-鼠标悬停给出具体百分比——「今天完成了多少」是连续量，布尔答不了。
-
-**健身那格是存在格**：跑步 / 跳绳 / 引体向上 / 平板支撑 / 健身器材 / 自由锻炼**任一有记录**就填满，
-再记一条不多一格。所以休息日读数是 `8/9` 而不是满分——训练是这一天的一部分，不是统计上的礼让。
-
-**卡片底色也会表态**：洗漱 / 洗澡 / 三餐 / 背单词按各自的完成条件转绿（记满、记齐、达标）；
-跑步 / 多邻国 / 跳绳 / 引体向上 / 平板支撑 / 健身器材 / 自由锻炼**有任意 1 条记录**即转绿；洗衣在**待洗为 0** 时转绿。
-底色只是当日状态的一眼可见——多邻国与健身各自的那一格仍按「≥1 条即计 1 格」走，统计口径不变。
-
-**任务的截止日是会有颜色的**：逾期与当天红色、3 日内橙色、7 日内黄色，更远则不强调；
-列表顺序是未完成在前、已完成后，各自按截止日升序，没有截止日的排在各自组末
-（复制的报告读同一个比较器，见 `src/client/board/task-order.ts`）。
-完成**不是删除**：勾完只是把进度推到目标量，记录与完成时间都留着，只有 × 才真正删除。
-
-**每条任务占两行**：第一行是「标题 (分类) 截止于X」，第二行是进度条 + `当前/目标量` + ✎ + ×。
-进度条兼作输入：拖动（或聚焦后按 ←/→）即改任务进度，**拖动时手柄与右侧读数实时跟随，松开才写一次**；
-没有目标量的任务退化为勾选项，点一下即可完成。完成状态不写成文字——满格加 ✓ 就是完成，条变红就是逾期。
-读数占定宽（`10/10` 也放得下），拖到进位时行宽不跳。**过了截止日且已完成的任务**收进列表底部的
-**归档**折叠区（纯前端派生，不落库、不动统计），活跃列表只剩还需要看的事。
-
-看板顶部是**完成度环 + 完成条**（9 个习惯格，外加当日到期的任务格），
-按分组自上而下全部列出（不做筛选），可切换到任意历史日**补卡**（不能进入未来；凌晨时段标注为"周X夜"）。
-右侧栏不再有独立看板标签页：入口是左侧栏的**习惯看板**，面板内用顶部「打卡 / 统计」切换两个视图。
-
-看板最底部是**复制纯文本报告**：把正在看的一天折成几行纯文本（完成度一行、每组习惯一行），
-末尾接**任务**列表——未完成的任务，加上**当日及以后截止**的已完成任务；每条 `- ` 一行、
-都写截止日（`M-D`，逾期注明，已完成行末 `✓`），顺序与看板一致，一键进剪贴板，直接粘到聊天里分享；
-剪贴板 API 不可用时走隐藏文本域兜底。
-
-背单词的进度是**加权**的：一个复习词按 1/5 个新词计入，分子分母同权，所以 100% 依然等于"目标达成"。
-
-统计视图按范围（近 7 天 / 本月 / 近 30 天 / 近 90 天 / 自定义）给出：习惯×日期热力图、
-每习惯达标数与连续天数、各习惯的求和指标、三餐（早饭打卡 + 总花费）、**心率-配速散点**
-（按里程档上色，每档一条 Pareto 前沿虚线——同档内"没有另一次跑得更快、心率还不更高"的那些），
-以及登记卡里的**累计专注**（区间内已闭合的专注会话，按开始日归属）。
-
-统计视图底部还有一张**数据**卡片：导出整个域为一份 JSON，或把这样一份文件读回来
-（先选文件预览条数，再决定**合并**还是**覆盖**），以及**清理未引用图片**。详见 [数据](#数据)。
-
-**语言**：界面跟随 DSH 外壳的语言设置（中文 / 英文），切换即时生效，不用重启。
-习惯名、按钮、表单标签、错误提示与复制出的报告都跟着走；数字、配速、里程与单位不翻译。
-改一条译名改的是 `src/client/copy/table.ts` 里那一行——宿主只持有 id，不知道任何语言。
+**复制纯文本报告**把正在看的一天折成几行贴得进聊天：完成度、每组习惯一行，末尾是任务列表
+（全部未完成 + 当日及以后截止的已完成，每条都写截止日 `M-D`，逾期注明，已完成行末 `✓`）。
 
 ## 安装
 
-> **这是给自己写的插件，不是通用产品：习惯清单是硬编码的。**
-> 九个习惯格（洗漱 ×2、洗澡、三餐、背单词、多邻国、健身）只写在 `src/host/habits.ts` 的 `HABITS` 里，
-> **没有"配置习惯"的开关**。
-> 所以**要自己用，强烈建议 fork 源码、把清单与常量改成自己的再构建**，而不是原样装上再找开关：
-> 改代码远比加开关便宜，直接装上的只是别人的作息表。
+> **推荐用法：fork 一份，让 DSH 自己改，再 `link:` 装上。**
+>
+> 每个人的习惯表都不一样，而这个插件的「可配置面」是**故意**小的：四个字段走 `Config`，其余全在代码里。
+> 把习惯、分组、统计卡做成界面上的枚举开关，只会让界面越来越杂，而且永远列不全——八个计数器、
+> 五种会话、谁和谁合成一格，都是会变的判断。在 DSH 里改自己 fork 的那份比加开关便宜：
+> 让 agent 先读 [AGENTS.md](./AGENTS.md) 与 [CONTEXT.md](./CONTEXT.md)，它就照本仓库自己的规矩改，
+> 改完跑一遍 `pnpm test` 就知道有没有把别处弄坏。所以**不要**原样装上再找「配置习惯」的开关（没有）——
+> fork 之后改成自己的作息，用下面的方式 A 装上。
 
-走 `Config` 的只有下面四个（写在 `cordis.yml`，不改代码就能调）：
+```powershell
+# A —— 本机（推荐）：link 不打包、不触发 pnpm 的构建审批；装完重启 dsh --profile web
+dsh plugin --profile web add link:D:/Projects/dsh-personal-track
+dsh --profile web --dump-config        # 应出现 "# == @ds-hu/personal-track" 层
 
+# B —— 从 GitHub 装：仓库只有源码，lib/ 由 prepare 在安装时现场构建
+dsh plugin --profile web add github:ds-hu/dsh-personal-track
+# pnpm 11 默认拦下依赖的构建脚本，首次会以 ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED 失败，
+# 并打印精确键（含 tarball 与 commit sha）。原样抄进 profile 的 pnpm-workspace.yaml：
+#   allowBuilds:
+#     @ds-hu/personal-track@https://codeload.github.com/ds-hu/dsh-personal-track/tar.gz/<sha>: true
+# 再跑一次同样的 add 即可。键里带 sha，仓库每推一个新提交就要重新批准一次。
+
+# C —— 临时试用，不安装
+dsh --profile web --patch D:/Projects/dsh-personal-track/dev.patch.yml
+```
+
+只有四个字段走配置（写在 `cordis.yml`，不改代码就能调）：
 | 字段 | 默认 | 作用 |
 |---|---|---|
 | `dayStartHour` | `4` | 习惯日起点；00:00–04:00 归前一晚 |
 | `timezone` | 本机时区 | 固定时区覆盖 |
-| `defaultVocabTarget` | `{ new: 20, review: 60 }` | 无历史快照可继承时的背单词目标 |
+| `defaultVocabTarget` | `{ new: 20, review: 60 }` | 无历史目标可继承时的背单词目标 |
 | `defaultRunMinutes` | `30` | 新跑步记录的默认时长 |
 
-其余全在源码里，**所谓"二改"就是改这些文件**：
-
-| 要改的东西 | 位置 |
-|---|---|
-| 习惯清单、格数与格名 | `src/host/habits.ts` — `HABITS` / `CELL_IDS` |
-| 每格怎么算达成（洗漱 2 次、洗澡 1 次、三餐各 1 次、多邻国 ≥1 节、健身 ≥1 条训练） | `src/host/derive.ts` — `dayCells()` 与它的 `cellValue`；次数上限校验在 `src/host/store.ts` 的 `addCheck` |
-| 背单词加权（复习 1 词按新词 1/5 计） | `src/host/derive.ts` — `NEW_WEIGHT` / `REVIEW_WEIGHT` |
-| 存什么字段（域 schema） | `src/host/domain.ts` |
-| 看板分组、卡片与顺序 | `src/client/board/BoardBody.tsx` |
-| 任务/影视书籍行的入口（标题点击与 ⤢） | `src/client/board/registry.tsx` |
-| 任务的显示顺序（看板与日报共用一个比较器） | `src/client/board/task-order.ts` |
-| 复制出的报告文本（含任务列表） | `src/client/board/report.ts` |
-| 统计视图的指标卡 | `src/client/board/stats-panel.tsx` |
-| 专注模式的版式与交互 | `src/client/board/FocusOverlay.tsx`（样式在 `src/client/styles.ts`） |
-| 专注栏的空态与最近一段卡 | `src/client/board/FocusColumn.tsx` |
-| 素材文本块的 Markdown 支持范围 | `src/client/board/markdown.ts` |
-| 单张图片上限（两半身共用） | `src/shared/route.ts` — `MAX_IMAGE_BYTES` |
-
-改完按 [开发](#开发) 重新构建：**动过宿主半身要重启 `dsh --profile web`**，只动客户端 bundle 是热重载。
-改到 `src/host/domain.ts` 就是改磁盘格式，别忘了那里的域 `version`——**加字段/加表要把旧版本列进 `compatibleVersions`**，
-否则 per-record 后端会把旧文档整份丢掉（不会迁移）。
-
-```powershell
-# 方式 A —— 本机开发（推荐）：pnpm link 到 web profile，需要重启一次
-dsh plugin --profile web add link:D:/Projects/dsh-personal-track
-dsh --profile web --dump-config        # 应出现 "# == @ds-hu/personal-track" 层
-# 然后重启：dsh --profile web
-
-# 方式 B —— 从 GitHub 装，不依赖本机路径：
-dsh plugin --profile web add github:ds-hu/dsh-personal-track
-# 仓库里只有源码，lib/ 靠 package.json 的 prepare 在安装时现场构建；pnpm 11
-# 默认拦下依赖的构建脚本，首次安装会以 ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED
-# 失败，并把**精确键**（包名@解析后的 tarball URL）打印出来：
-#   allowBuilds:
-#     @ds-hu/personal-track@https://codeload.github.com/ds-hu/dsh-personal-track/tar.gz/<sha>: true
-# 把这一行原样抄进 profile 的 pnpm-workspace.yaml，再跑一次同样的 add 就装上了。
-# 裸包名（@ds-hu/personal-track）不生效，带 @* 也会被拒（pnpm 只认精确版本）；
-# 键里带 commit sha，所以仓库每推一个新提交这个键就变，要重新批准一次
-# —— 本机开发请走方式 A：link 不打包、不触发这道审批。
-```
-
-临时试用（不安装，改完即用）：
-
-```powershell
-# --patch 是启动器级选项，必须写在 web 之前；写成 dsh web --patch … 会被转发给 web 应用并报错
-dsh --profile web --patch D:/Projects/dsh-personal-track/dev.patch.yml
-```
-
-patch 行的三条对齐铁律：
-
-| 字段 | 本插件的值 | 为什么是它 |
-|---|---|---|
-| `name` | `@ds-hu/personal-track`（包名） | Loader 据此从 profile 的 `node_modules` 解析代码；**必须等于包名**，否则这个 bundle 起不来 |
-| `id` | `personal-track` | 行自己的键：profile patch 用它写 `disabled` 覆盖，改它等于改所有既有覆盖 |
-| 宿主导出的 `name` | `personal-track` | 与 `id` 一致（诊断与 effect 标签用）；它**不是**包名 |
-
-浏览器模块 id 由 `scripts/build.mjs` 从 `package.json` 的 `name` 读出来，不手写第二份；
-`verify-client.mjs` 再对着 manifest 断言一次，所以改名不会漏掉其中一半。
-
-**从包名还是 `personal-track` 的版本升上来，要重装一次**：Loader 按 profile 里那条依赖的名字解析这一行，
-旧名字在新包里已经不存在，于是这一行（以及它的浏览器半身）起不来。两条命令即可：
-
-```powershell
-dsh plugin --profile web remove personal-track
-dsh plugin --profile web add link:D:/Projects/dsh-personal-track
-```
-
-数据与备份都不受影响：存储域在 `~/.dsh/storages/habit/`，备份格式仍是 `personal-track/backup`，
-行 `id` 与宿主导出的 `name` 也没变（写 `disabled` 覆盖的地方照旧）。
-
-## 开发
-
-```powershell
-pnpm install      # 装依赖；prepare 顺带跑一次 build（与下面等价）
-pnpm build        # 产出 lib/index.js（ESM）与 lib/client.js（浏览器闭包工厂）
-pnpm watch        # 只重建产物；客户端 bundle 改动会被宿主轮询到并热重载
-pnpm typecheck    # 三个独立程序（宿主 / 浏览器 / 测试）
-pnpm test         # 逐文件跑 tests/*.test.ts，任一失败即整体失败
-pnpm verify       # 先构建，再跑客户端 facade + 宿主真实栈端到端
-```
-
-**测试分两层，理解这个划分是读懂这套测试的关键。**
-
-- `tests/` 是**规则**层：全部在进程内跑，不起端口、不落盘。`tests/support.ts` 提供一个内存
-  `Domain`（`MemoryDomain`，六个方法的 `Map` 实现）和一个不存在的 HTTP 请求/响应替身，
-  于是 `store.ts`、`stats.ts`、`backup.ts`、宿主路由都能被直接驱动。
-- `scripts/verify-*.mjs` 是**接线与持久化**层：真 storage hub、真 JSON 后端、真端口、真重启、
-  真备份往返。规则类断言不在那里重复。
-
-`ApiDeps.now` 与 `Config.now` 是同一条时间缝线：宿主默认用本机时钟，测试与 `verify-host.mjs`
-传一个固定时刻，因此「今天到期的任务」「在区间内完成」这类断言不再依赖运行时刻。
-若某条规则只能通过跑完整栈才能验证，那说明它缺少一条缝线，而不是该多写一条端到端断言。
-
-**宿主代码改动必须重启 `dsh`**（Node 的 ESM 缓存不因 patch 重载失效）；**客户端 bundle 改动是热重载**。
-若客户端比宿主新，看板会直接提示「插件宿主半身未更新：请重启 dsh --profile web」。
+其余都在源码里：改哪一种格怎么算达成改 `src/host/derive.ts`，改卡片与分组改
+`src/client/board/BoardBody.tsx`，改文案改 `src/client/copy/table.ts`。
+逐条清单见 [CONTEXT.md](./CONTEXT.md) 的**习惯清单**与 [AGENTS.md](./AGENTS.md)。
 
 ## 数据
 
 `~/.dsh/storages/habit/`，人类可读的 JSON，per-record 布局：
+`days/<日期>.json`（一个习惯日）、`counters/laundry.json`（待洗存量）、
+`media/<id>.json`、`tasks/<id>.json`（登记条目）、`assets/<id>.json`（素材图片字节）。
+**空白天不产生文档**；只存事实，格数、比率、连续、逾期、专注时长都是读的时候派生的。
 
-| 路径 | 内容 |
-|---|---|
-| `days/<YYYY-MM-DD>.json` | 一个习惯日的全部数据（打卡时间、槽位、会话、洗涤） |
-| `counters/laundry.json` | 待洗存量（权威值；洗涤历史在天文档里） |
-| `media/<id>.json` · `tasks/<id>.json` | 登记条目（含素材引用与专注会话） |
-| `assets/<id>.json` | 一张素材图片的字节（base64）与其 mime |
+**备份**：统计视图的「导出」得到 `personal-track-<日期>.json`（格式 `personal-track/backup`，版本 3），
+只含事实——导入后重算一切派生值，所以文件里不可能出现与数据矛盾的字段。v1 / v2 仍可导入；反向不行
+（旧的构建会整份拒绝它不认识的版本）。「选择备份…」只解析并显示条数，此时还没写入；随后选**合并**
+（同键覆盖）或**覆盖**（额外删掉文件里没有的本地记录），整份先按同一套 schema 校验，任何一条不合法即整份拒绝。
 
-**空白天不产生文档**：没有任何记录的一天在磁盘上不存在，读接口也从不创建文档。
+## 开发
 
-**跳绳的旧文档照常读**：0.4.0 及以前把一天记成多组、每组带 90/180 定数；这些记录仍然合法，
-读取时合并成一天一条（次数与用时相加、心率按用时加权、时间取最早一组），编辑那一天时归一。
-域版本不升，备份版本也不动。
-
-**图片是唯一存了二进制的地方**，而它只存字节：mime 与大小都是读的时候从字节派生的
-（见 [ADR 0003](./docs/adr/0003-assets-in-domain-as-base64.md)）。删素材、删条目都会即时清掉对应的字节，
-数据卡里的「清理未引用图片」只兜被中断的写入留下的孤儿。
-
-### 备份
-
-统计视图的「导出」拿到一份 `personal-track-<日期>.json`：
-
-```json
-{ "format": "personal-track/backup", "version": 3, "exportedAt": "…",
-  "days": [ … ], "counters": { "laundry": { … } }, "media": [ … ], "tasks": [ … ],
-  "assets": [ { "id": "…", "mime": "image/png", "data": "<base64>", "createdAt": "…" } ] }
+```powershell
+pnpm install     # 装依赖；prepare 顺带 build
+pnpm build       # lib/index.js（宿主）+ lib/client.js（浏览器闭包工厂）
+pnpm test        # 逐文件跑 tests/*.test.ts
+pnpm typecheck   # 宿主 / 浏览器 / 测试三个独立程序
+pnpm verify      # 构建 + 客户端 facade + 宿主真实栈端到端
 ```
 
-它**只含事实**：没有格数、比率、连续天数、逾期标记、专注时长、图片大小——这些导入后从记录重算，
-所以文件里不可能有与数据本身矛盾的字段（任务/媒体各自带 `id`，日文档自带 `date`，因此不需要外层键）。
-版本 1 与 2 的文件仍可导入：v1 那时还没有图片，按空图片集处理；v2 没有「自由锻炼」，按这天没记处理。
-反向是拒绝的——旧构建读到版本 3 会整份拒绝，而不是把它不认识的字段静默剥掉。
-
-「选择备份…」只解析文件并显示条数，**此时还没有写入**；随后：
-
-- **合并**：文件里的记录按同键覆盖，本地多余的保留；
-- **覆盖（清空现有）**：额外删除文件中没有的本地记录（含图片字节），用于整机迁移或回滚。
-
-宿主会先把整份文件按同一套 zod schema 校验通过再落盘，任何一条不合法即整份拒绝（400 `habit/bad-backup`），
-不会出现"导入了一半"；跨记录的规则也在这一步查：检查点缺目标量、**图片素材缺对应字节**，都是整份拒绝。
+改完**动过宿主半身要重启 `dsh --profile web`**，只动客户端 bundle 是热重载。规则、坑与验证口径在
+[AGENTS.md](./AGENTS.md)，领域术语在 [CONTEXT.md](./CONTEXT.md)，设计背景在 [docs/adr/](./docs/adr/)，版本变化在 [CHANGELOG.md](./CHANGELOG.md)。
 
 ## 结构
 
 ```
-src/shared/  route.ts（/habit/api 的唯一路由声明：两半身共用 method + path + 图片上限）
-             habit-day.ts（习惯日算术：两半身共用一份，含夜段与到期带的量距）
-             focus-session.ts（专注会话：两半身共用一份——时长、未闭合、开合与「最近一段」）
-src/host/    index.ts（装配）· config.ts（含时间缝线 now）
-             api.ts（传输：读 body、查表、映射失败形状，含唯一的二进制响应臂）
-             routes.ts（每个路由一个 handler，返回响应体；素材与专注路由也在这里）
-             api-error.ts（统一的失败词汇）· habits.ts（习惯清单：8 个习惯 / 9 个格）
-             domain.ts（zod + 域声明 + assets 表）· derive.ts（派生规则：格、状态、配速、连续）
-             store.ts（域访问；打卡上限与身份、素材增删、专注会话、级联与孤儿清扫）
-             backup.ts（事实文件的读写与校验，v3 带自由锻炼、兼容 v1/v2）· stats.ts（范围聚合）
-src/client/  index.tsx（注册面：唯一主面板 + 侧栏入口）· api.ts（命令面，base/fetch 可注入）
-             types.ts（线上契约）· styles.ts（注入式样式表，含专注模式与专注栏）
-             board/（tile 原语 + 看板卡片 + 统计面板 + 数据卡片 + TrackPanel/FocusColumn/FocusOverlay）
-             board/editor-state.ts（编辑器与导入状态机，纯函数）
-             board/focus.ts（专注的纯规则：交接、时长与时刻格式）· board/markdown.ts（迷你 Markdown 解析）
-             board/write-queue.ts（专注模式写入的串行队列：先落库，再退出）
-             board/Markdown.tsx（把解析结果渲染成 React 节点，不经过 HTML 注入）
-scripts/     build.mjs（esbuild CLI 双产物）· run-tests.mjs（逐文件跑测试）
-             verify-client.mjs · verify-host.mjs（真实栈：接线与持久化）
-tests/       support.ts（内存 Domain + 无端口 HTTP 驱动，按 schema 校验记录）
-             data-layer.test.ts（习惯日与派生值）· store.test.ts · stats.test.ts · backup.test.ts
-             api-handle.test.ts · focus.test.ts（专注会话与素材）· markdown.test.ts
-             client-format.test.ts · client-api.test.ts · editor-state.test.ts
-             shared-focus.test.ts（专注会话规则：时长、开合、最近一段）
-             focus-panel.test.ts（专注退出后的交接、写队列与最近一段的派生）
-docs/adr/    0001 树外传输 · 0002 状态派生不落库 · 0003 图片存域内 base64
-icon.svg     Plugins 面板的卡片 / 详情页 / 组件行图标（完成度环，与看板顶部那个同源）
-locale/      en.json · zh.json（`meta.title` 与 `meta.description`，Plugins 面板的标题与一句话说明）
-demo/        focus-mode.html（专注模式的零依赖单文件 demo，与实现同步；它读系统偏好、
-             带全局 border-box，是因为它自己就扮演「外壳」，见文件顶部注释）
+src/shared/   两半身共用的纯规则：路由声明、习惯日算术、专注会话、跳绳合并
+src/host/     zod 域 + 派生 + 存储访问 + 路由 + 统计聚合 + 备份读写
+src/client/   api（命令面）· copy/（全部界面文字）· board/（看板、统计、专注、素材）
+              styles.ts（注入式样式表）· index.tsx（唯一主面板 + 侧栏入口）
+scripts/      build.mjs · run-tests.mjs · verify-client.mjs · verify-host.mjs
+tests/        规则层（进程内、无端口、无磁盘）；接线与持久化在 scripts/verify-*.mjs
+docs/adr/     0001 树外传输 · 0002 状态派生不落库 · 0003 图片存域内 base64 · 0005 共享习惯日
 ```
 
-## 工具链注意事项（都踩过）
-
-- **esbuild 用原生 CLI，不用其 JS API**：JS API 通过管道 stdio 派生编译器子进程，被 DSH 文件沙箱拒绝
-  （`spawn EPERM`）；CLI 本身就是编译器，以继承 stdio 执行，无需管道派生。
-- **测试用 Node 原生类型剥离**（`node tests/*.test.ts`）而不是 vitest：vite/vitest 内部经 esbuild JS API
-  转换 TS，同样被沙箱挡住。
-- **`pnpm-workspace.yaml` 的 `allowBuilds: esbuild: false`**：我们直接调二进制，不需要它的 postinstall。
-- **Plugins 面板的图标与本地化标题全靠 manifest，而且要能经 ESM 解析器取到**：外壳不执行插件代码来画卡片，
-  它解析 `<包名>/package.json` 读 `icon`（manifest 相对路径、SVG/PNG/JPEG/WebP、≤256 KiB、必须留在包目录内），
-  再解析 `<包名>/locale/en.json` 拿到标题与说明，最后把图标内联成 data URI。三条容易被忽略的边界因此都
-  写在 `verify-client.mjs` 里：`./package.json` 与 `./locale/*.json` 必须留在 `exports` 里（否则
-  `ERR_PACKAGE_PATH_NOT_EXPORTED`，卡片只剩默认占位图），`icon.svg` 与 `locale/*.json` 必须写进 `files`
-  （否则 checkout 里好好的、装完就没了），`locale/` 里**每个** `.json` 的文件名都必须是语言 id
-  （`dictionariesOf` 扫整目录，一个 `zh_CN.json` 就让整目录失效）。标题按 `zh-CN → zh → en` 的兜底链取，
-  所以文件名写 `zh.json` 就够。
-- **`verify` 里不要嵌 `pnpm build`**：那会触发 pnpm 的依赖自检，无 TTY 时直接以
-  `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` 中止。写成 `node scripts/build.mjs` 后，`pnpm verify`
-  与 `npm run verify` 都能跑。
-- **二次跑 `verify` 前先清 `.tmp/verify-host`**：JSON 后端每次写入都是「临时文件 + rename」，而沙箱在工作区
-  根上有一条 Everyone 的「删除子目录与文件」拒绝项（沙箱的预期设计）。一次中断的运行会留下 `habit/days/*.json`，
-  下一次运行时 `rm` 清不掉它，随后的 rename 覆盖就被拒（`EPERM ... rename`）。删掉那个临时目录再跑即可。
-- **客户端 bundle 的运行时依赖只能是冻结平台表内的模块**（`react`、`react/jsx-runtime`，表里其实还有
-  `react-dom` 等）；其他 `@deepseek-ai/*` 一律 `import type`，构建期擦除。跨插件取值一律经 `ctx` 服务或 slots。
-  **专注模式因此不用 `createPortal`**：那要引入 `react-dom` 这个运行时依赖，而它要解决的问题（祖先元素把
-  fixed 定位困住）已被主路径覆盖——原生全屏的元素渲染在 top layer，祖先既裁不到也偏不了。
-- **域的版本升级要列 `compatibleVersions`**：per-record 后端对不接受的版本是**丢弃**而不是迁移，
-  升级 `version` 而不列旧版本，等于把历史数据删掉。
-- **上限判定要用同一个单位**：图片上限按**解码后字节数**比较（base64 编码后的长度比它粗最多 3 字节，
-  拿字符串长度比会让 `MAX + 1` 字节溜过去）。
-- **`prefers-color-scheme` 不是外壳主题的信号**：令牌挂在 `body` 上，翻转它的是 `body[data-ds-dark-theme]`。
-  按系统偏好判深浅，在「系统深色 + 外壳浅色」这类组合下会把整屏画成反的——不透明的弹窗尤其显眼。
-  配套的一条：**主题切换写成继承的变量，别写成 `body[data-ds-dark-theme] .某元素 { background: … }`**，
-  属性选择器会多带一个 class 级权重，反压过 `.某元素:hover`，把悬停色吃掉。
-- **`box-sizing` 没人替你重置**：外壳只在组件内逐条声明，没有全局 `*` 重置，而 demo 有全局重置——
-  所以「demo 里好好的」不能证明实现里也好。`width:100%` 再带左右 padding/border 的盒子在内容盒下
-  必然宽出所在列（笔记框就是这样横跨了专注模式的分界线，右缘越线 8px）。`verify-client.mjs` 现在按这个
-  **形状**逐条断言：这类盒子必须自己写 `box-sizing: border-box`。同一处还守住了「弹窗底必须是外壳令牌
-  加不透明字面量兜底」「样式表里不出现 `prefers-color-scheme`」「≤720px 隐藏专注栏」。
-- **SlotMap 是按 import 做声明合并的**：用到某个 slot 就必须 import 声明它的包（例如
-  `sidebar.panellist` 在 `@deepseek-ai/dsh-client-ui-sidebar/client`），否则类型上根本不存在。
-- **`ctx.<服务>` 每一个都要写进客户端插件的 `inject` 导出**：声明合并让类型随时可见，但 cordis
-  运行时只解析 inject 集合里的服务名，漏写要到真正访问那一刻才抛
-  `cannot get property "…" without inject`（统计按钮的 `ctx.layout` 就这样漏过）。`scripts/verify-client.mjs`
-  的假 context 是带同款守卫的 Proxy，未声明的访问会在 facade 测试里当场炸掉。
-- **登记写回（`POST/PATCH /tasks`、`POST/PATCH /media`）答的 `entry` 是「视图」**：素材带由 `assets`
-  派生的 `mime` 与字节数，条目带派生的 `focusSeconds`（任务还带 `state`/`overdue`）——与 `/state`
-  列表里的条目同一个形状。它一度错发成**存储记录**（`routes.ts` 的 `addTask`/`patchTask` 等直接
-  `entry: record`），而专注模式把回包整个当成自己的条目用：拖一下进度条，图片就全被判成「缺失」、
-  累计专注变成 `NaN`。两边现在都由 `writeAnswer` 出这一个形状，客户端的 `isEntryView`
-  （`src/client/board/focus.ts`）在采纳前再确认一次——客户端 bundle 热重载而宿主半身未重启时，
-  它会提示「插件宿主半身未更新」而不是照着旧形状画。
-- **专注会话要在页面卸载时闭合**：`pagehide` + `endFocus(..., { keepalive: true })`。不闭合的话，
-  刷新/关标签后那段真实时长会变成「未闭合会话」，被下一次进入专注模式时丢弃（看起来就是专注时长归零）。
-  事件本身无法用本仓库的测试框架断言（没有 DOM 渲染），所以 `verify-client.mjs` 按**形状**守住产物里
-  必然出现 `addEventListener("pagehide"` 这一条。
-- **退出专注后看板必须重读，而它读的不是今天**：面板与看板各持一份 `state` —— 面板读**今天**（专注栏与
-  最近一段卡），看板读**正在看的那一天**（可能是历史日），所以合并成一个 slice 是错的，只能让看板按
-  `refreshToken` 重读它自己那一天。`onClose(entry)` 带回的条目要**真的用上**（`withEntry` 先本地采纳，
-  卡片当场更新），再由宿主的重读确认。
-  写入还必须**串行**（`board/write-queue.ts`）：拖动进度条连发几次**绝对值**的写，回包乱序时「最后一个
-  响应」并不是最后一次写，采纳它就等于让旧值盖住新值；退出时先 `settled()` 再重读宿主，否则重读会跑在
-  最后一次写前面。两件合起来，就是「退出专注后进度条停在 17，切一天或刷新才对」。
-- **写入只有一种答复形状**：它改动的**习惯日 slice**（`day`/`stock`/`tasks`/`media`），外加这次写独有的
-  事实（`entry`、`sessionId`、`removed`、`report`）。**登记**条目不属于任何习惯日，所以那些写接受一个
-  可选的"视点日"（`date`，默认今天）：看板把**它正在看的那一天**送上去，回包就能直接采纳，不必写完
-  再读一次（ADR 0004）。**素材清扫**是唯一例外——它不改任何日，只答 `{ok, removed}`。
-- **习惯清单只有一份**（`src/host/habits.ts`）：8 个习惯拥有 9 个格，"达标"由该习惯名下的格全满派生，
-  所以格条、连续与统计热力网格是同一条规则；wire 上的打卡/餐位枚举与中文标签也取自它。加一个习惯
-  改的是这份清单，`tests/habits.test.ts` 会在任何第二份清单冒出来时变红。
-- **打卡的每日上限在 store 的原子改写内**：先读后写的检查会让两个并发打卡都读到 1、各加一次，
-  落下第三次。上限、默认下标与"没有这条打卡"因此都属于 `addCheck`/`retimeCheck`/`removeCheck`，
-  路由只解析日期与时刻。DELETE 一条已不在的记录是幂等成功，PATCH 一条不存在的记录是 404。
-- **习惯日算术只有一份**（`src/shared/habit-day.ts`）：客户端不再手抄 `shiftKey`，专注模式也不再拿
-  本地日历日当"今天"——夜段里那正是"专注模式显示今天、看板显示 3 天后"的来由（ADR 0005）。
+图标 `icon.svg`（完成度环），Plugins 面板的标题与一句话说明来自 `locale/{zh,en}.json`。

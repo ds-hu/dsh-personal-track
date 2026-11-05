@@ -10,3 +10,6 @@ lib/
 
 # Screenshots and snapshots from the harness's own review tabs (clarity test)
 .clarity/
+
+# Playwright artifacts from taking the README screenshots
+.playwright-mcp/
