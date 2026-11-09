@@ -197,13 +197,14 @@ export interface HabitStore {
   removeCheck(key: DayKey, habit: CheckHabit, index?: number): Promise<DayRecord>
   setVocabTarget(key: DayKey, target: VocabTarget): Promise<DayRecord>
   /**
-   * Append one session — except for **跳绳**, which is one record a day (the
-   * running shape): there a write replaces the day's record, legacy sets
-   * included. That is also how the board edits it, so there is one write path,
-   * not a create path and an edit path that can disagree.
+   * Append one session; every session kind is a list, **跳绳** included.
+   *
+   * A jump-rope day is a list of sets, and a second write adds a set instead of
+   * replacing the day's record — replace-on-write is what made a second set
+   * impossible to record once already.
    */
   addSession(key: DayKey, kind: SessionKind, entry: Record<string, unknown>): Promise<DayRecord>
-  /** Merge a patch into one session; **跳绳** patches the merged day record. */
+  /** Merge a patch into one session by id, whatever its kind. */
   patchSession(key: DayKey, kind: SessionKind, id: string, patch: Record<string, unknown>): Promise<DayRecord>
   /** Remove one session: every session kind is a list, one entry at a time. */
   removeSession(key: DayKey, kind: SessionKind, id: string): Promise<DayRecord>
