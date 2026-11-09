@@ -15,7 +15,6 @@ import {
   focusSeconds,
   latestClosed,
   openSession,
-  recentFocus,
   withClosedSession,
   withOpenedSession,
   type Session,
@@ -81,23 +80,6 @@ check('closing stamps the open one and leaves every other id alone', () => {
   )
   assert.deepEqual(withClosedSession([closed, open], 'nope', T30), [closed, open], 'an unknown id is a no-op')
   assert.deepEqual(withClosedSession([closed], 'a', T30), [closed], 'and the first stamp stands')
-})
-
-check('recentFocus takes the newest closed session across both registries', () => {
-  const task = { id: 't1', focusSessions: [session('a', T0, T10)] }
-  const media = { id: 'm1', focusSessions: [session('b', T20, T40), session('open', T50)] }
-  const recent = recentFocus([task, media])
-  assert.equal(recent?.entry, media, 'the entry comes back by reference, so its own type survives')
-  assert.equal(recent?.session.id, 'b', 'and the open session is not the most recent one')
-  assert.equal(recentFocus([{ id: 'x', focusSessions: [] }]), undefined, 'no closed session, no card')
-  assert.equal(recentFocus([]), undefined)
-})
-
-check('a deleted entry takes its session with it, and the answer falls to the next one', () => {
-  const older = { id: 't1', focusSessions: [session('a', T0, T10)] }
-  const newer = { id: 'm1', focusSessions: [session('b', T20, T40)] }
-  assert.equal(recentFocus([newer, older])?.entry, newer)
-  assert.equal(recentFocus([older])?.entry, older, 'hard delete leaves nothing to dangle')
 })
 
 report()

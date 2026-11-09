@@ -12,17 +12,16 @@
  * - leaving the mode waits for them (`settled`), so the board's re-read cannot
  *   race the last write;
  * - the entry handed back is adopted into the panel's slice instead of dropped;
- * - the card is the newest **closed** session across both registries, i.e. a
- *   derived fact rather than a browser-local pin. A completed task keeps its
- *   session: finishing is not deleting, and the card reports what happened
- *   instead of curating what should stay on screen.
+ * - the column's "focused on" list is ordered by the newest **closed** session,
+ *   not by total time: it answers "what was I just doing", while the total is a
+ *   quantity and belongs on the row.
  *
  * Runs on Node's native type stripping:
  *   node tests/focus-panel.test.ts
  */
 import { strict as assert } from 'node:assert'
-import { recentFocus } from '../src/shared/focus-session.ts'
-import { withEntry } from '../src/client/board/focus.ts'
+import { focusSeconds } from '../src/shared/focus-session.ts'
+import { byRecentFocus, lastFocusAt, withEntry } from '../src/client/board/focus.ts'
 import { createWriteQueue } from '../src/client/board/write-queue.ts'
 import type { FocusSession, MediaEntry, StateView, TaskEntry } from '../src/client/types.ts'
 
@@ -56,7 +55,7 @@ function closed(id: string, startedAt: string, endedAt: string): FocusSession {
   return { id, startedAt, endedAt }
 }
 
-/** A task entry carrying these focus sessions. */
+/** A task entry carrying these focus sessions, with the total the host derives. */
 function taskFocusing(id: string, state: TaskEntry['state'], sessions: readonly FocusSession[]): TaskEntry {
   return {
     ...taskOf({
@@ -69,6 +68,7 @@ function taskFocusing(id: string, state: TaskEntry['state'], sessions: readonly 
       overdue: false,
     }),
     focusSessions: sessions,
+    focusSeconds: focusSeconds(sessions),
   }
 }
 
@@ -77,6 +77,7 @@ function mediaFocusing(id: string, sessions: readonly FocusSession[]): MediaEntr
   return {
     ...mediaOf({ id, kind: 'film', title: id, status: 'active', createdAt: '2026-09-10T10:00:00' }),
     focusSessions: sessions,
+    focusSeconds: focusSeconds(sessions),
   }
 }
 
@@ -235,30 +236,46 @@ await check('an entry the slice does not hold leaves it exactly as it was', () =
   assert.equal(withEntry(SLICE, stranger), SLICE, 'the same slice back, not an empty rebuild')
 })
 
-console.log('what the column derives its card from')
-await check('the card is the newest closed session, across both registries', () => {
+console.log('what the column’s "focused on" list is ordered by')
+
+await check('most recently worked on first, across both registries', () => {
   const task = taskFocusing('t1', 'doing', [closed('a', '2026-09-20T09:00:00.000Z', '2026-09-20T09:30:00.000Z')])
   const media = mediaFocusing('m1', [
     closed('b', '2026-09-20T11:00:00.000Z', '2026-09-20T11:20:00.000Z'),
     { id: 'open', startedAt: '2026-09-20T12:00:00.000Z' },
   ])
-  const recent = recentFocus([task, media])
-  assert.equal(recent?.entry, media, 'the newest session decides the card, not the registry it sits in')
-  assert.equal(recent?.session.id, 'b', 'and an open session is not a fact yet')
+  const ordered = [task, media].sort(byRecentFocus)
+  assert.deepEqual(
+    ordered.map(entry => entry.id),
+    ['m1', 't1'],
+    'the newer session leads, whichever registry it sits in',
+  )
 })
 
-await check('a completed task keeps its session: finishing is not deleting', () => {
-  // The old pin retired a done task; the card is a fact now, so it stays until
-  // another session becomes the most recent one.
-  const done = taskFocusing('t1', 'done', [closed('a', '2026-09-20T09:00:00.000Z', '2026-09-20T09:30:00.000Z')])
-  assert.equal(recentFocus([done])?.entry, done)
+await check('total time does not decide the order', () => {
+  // Two hours two days ago versus ten minutes just now: the ten minutes lead,
+  // because the list answers "what was I just doing", not "what did I do most".
+  const longAgo = taskFocusing('t1', 'doing', [
+    closed('a', '2026-09-18T09:00:00.000Z', '2026-09-18T11:00:00.000Z'),
+  ])
+  const justNow = mediaFocusing('m1', [
+    closed('b', '2026-09-20T11:55:00.000Z', '2026-09-20T12:05:00.000Z'),
+  ])
+  assert.ok(justNow.focusSeconds < longAgo.focusSeconds, 'the fixtures really are the wrong way round by time')
+  assert.deepEqual([longAgo, justNow].sort(byRecentFocus).map(entry => entry.id), ['m1', 't1'])
 })
 
-await check('an entry with no closed session is not a candidate', () => {
-  const idle = taskFocusing('t2', 'todo', [])
-  const focused = taskFocusing('t1', 'doing', [closed('a', '2026-09-20T09:00:00.000Z', '2026-09-20T09:30:00.000Z')])
-  assert.equal(recentFocus([idle]), undefined, 'nothing focused yet, so the column is the empty state')
-  assert.equal(recentFocus([idle, focused])?.entry, focused)
+await check('an open session orders nothing, and ties keep the order they came in', () => {
+  const idle = taskFocusing('t1', 'todo', [])
+  const openOnly = mediaFocusing('m1', [{ id: 'open', startedAt: '2026-09-20T12:00:00.000Z' }])
+  const focused = taskFocusing('t2', 'doing', [closed('c', '2026-09-20T09:00:00.000Z', '2026-09-20T09:30:00.000Z')])
+  assert.deepEqual(
+    [idle, openOnly, focused].sort(byRecentFocus).map(entry => entry.id),
+    ['t2', 't1', 'm1'],
+    'the entry with a closed session leads; the two with none keep their input order',
+  )
+  assert.equal(lastFocusAt(idle), Number.NEGATIVE_INFINITY, 'never focused on is not a time')
+  assert.equal(lastFocusAt(openOnly), Number.NEGATIVE_INFINITY, 'and an open session is not a fact yet')
 })
 
 console.log(`\n${passed} checks passed`)

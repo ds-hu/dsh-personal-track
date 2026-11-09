@@ -102,30 +102,3 @@ export function withClosedSession(
   return sessions.map(session =>
     session.id === sessionId && session.endedAt === undefined ? { ...session, endedAt } : session)
 }
-
-/**
- * What the focus column is showing: the entry whose closed session started last,
- * over **both** registries.
- *
- * The entry comes back by reference, so a caller keeps its own type (a task
- * entry stays a task entry). Open sessions are ignored, as everywhere else; an
- * entry with no closed session is not a candidate. Nothing is stored for this —
- * delete the entry and its sessions go with it (registry entries are hard
- * deletions), so the answer simply falls to the next most recent one instead of
- * dangling.
- */
-export function recentFocus<T extends { readonly focusSessions: readonly Session[] }>(
-  entries: readonly T[],
-): { readonly entry: T; readonly session: Session } | undefined {
-  let best: { readonly entry: T; readonly session: Session } | undefined
-  let bestAt = Number.NEGATIVE_INFINITY
-  for (const entry of entries) {
-    const session = latestClosed(entry.focusSessions)
-    if (session === undefined) continue
-    const at = Date.parse(session.startedAt)
-    if (!Number.isFinite(at) || at <= bestAt) continue
-    best = { entry, session }
-    bestAt = at
-  }
-  return best
-}

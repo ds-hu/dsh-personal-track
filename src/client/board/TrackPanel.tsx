@@ -22,6 +22,7 @@ import { BoardBody } from './BoardBody.tsx'
 import { FocusColumn } from './FocusColumn.tsx'
 import { FocusOverlay } from './FocusOverlay.tsx'
 import {
+  byRecentFocus,
   kindOf,
   targetOf,
   withEntry,
@@ -104,13 +105,12 @@ function Panel({ client }: { readonly client: HabitClient }): JSX.Element {
    *
    * Derived from the entries the panel holds, so a task focused on from the board
    * appears here without being copied into a todo — and the row can never
-   * disagree with the entry they both come from. Sorted by the time spent,
-   * because that is what this half of the column is a record of.
+   * disagree with the entry they both come from. **Most recent first**: this
+   * half of the column is a record of what you were just doing, and the totals
+   * are printed on the rows rather than used to rank them.
    */
   const focusedEntries = useMemo(
-    () => entries
-      .filter(entry => entry.focusSeconds > 0)
-      .sort((a, b) => b.focusSeconds - a.focusSeconds),
+    () => entries.filter(entry => entry.focusSeconds > 0).sort(byRecentFocus),
     [entries],
   )
 

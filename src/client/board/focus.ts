@@ -13,6 +13,7 @@
  * focus state left in the panel is the in-memory target of an open overlay.
  */
 import type { Copy } from '../copy/index.tsx'
+import { latestClosed, type Session } from '../../shared/focus-session.ts'
 import { weekdayNameOf } from './format.ts'
 import type { MediaEntry, RegistryKind, StateView, TaskEntry, TodoEntry } from '../types.ts'
 
@@ -91,6 +92,48 @@ export function withEntry(state: StateView, entry: RegistryEntry): StateView {
   }
   if (!state.todos.some(todo => todo.id === entry.id)) return state
   return { ...state, todos: state.todos.map(todo => (todo.id === entry.id ? entry : todo)) }
+}
+
+/**
+ * When an entry was last sat down with, in milliseconds.
+ *
+ * The start of its most recent **closed** session, because that is what
+ * **最近专注** means everywhere else (see `src/shared/focus-session.ts`): an open
+ * session has no honest end yet, so it cannot order anything. `-Infinity` for an
+ * entry that has never been focused on, which sorts it last without a special
+ * case at the call site.
+ *
+ * @param entry - anything carrying focus sessions.
+ * @returns the instant, or `-Infinity`.
+ */
+export function lastFocusAt(entry: { readonly focusSessions: readonly Session[] }): number {
+  const session = latestClosed(entry.focusSessions)
+  if (session === undefined) return Number.NEGATIVE_INFINITY
+  const at = Date.parse(session.startedAt)
+  return Number.isFinite(at) ? at : Number.NEGATIVE_INFINITY
+}
+
+/**
+ * The column's "focused on" order: **what you worked on most recently, first**.
+ *
+ * Deliberately not by total time. The list answers "what was I just doing" — its
+ * job is to put the thing you left a minute ago back within reach — while the
+ * total is a quantity, and quantities belong on the row, where it is printed.
+ * Ordering by the total turns the list into a leaderboard of the week, which is
+ * not a question anyone asks of their own todo column.
+ *
+ * @param a - one entry.
+ * @param b - another.
+ * @returns negative when `a` was worked on more recently.
+ */
+export function byRecentFocus(
+  a: { readonly focusSessions: readonly Session[] },
+  b: { readonly focusSessions: readonly Session[] },
+): number {
+  const left = lastFocusAt(a)
+  const right = lastFocusAt(b)
+  if (left === right) return 0
+  return right - left
 }
 
 /**
