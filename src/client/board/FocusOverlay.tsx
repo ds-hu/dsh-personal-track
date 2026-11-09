@@ -20,10 +20,10 @@
 import { useCallback, useEffect, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
 import { staleHostError, type HabitClient, type MediaPatch, type TaskPatch } from '../api.ts'
 import { useCopy, type Copy } from '../copy/index.tsx'
-import { MAX_IMAGE_BYTES } from '../../shared/route.ts'
 import type { Material, MediaEntry, TaskEntry } from '../types.ts'
 import { dueLevelOf, fractionText, mediaStatusLabel, messageOf, percentOf } from './format.ts'
 import { formatDuration, isEntryView, nowLabel, type FocusTarget, type RegistryEntry } from './focus.ts'
+import { byteSizeText, imageInputOf } from './image-input.ts'
 import { openSession } from '../../shared/focus-session.ts'
 import { Markdown } from './Markdown.tsx'
 import { IconButton } from './tile.tsx'
@@ -64,35 +64,6 @@ export interface FocusOverlayProps {
    * progress edited on this screen visible the moment the overlay goes away.
    */
   readonly onClose: (entry: RegistryEntry) => void
-}
-
-/** Read one image file into the wire's shape, or explain why it cannot go. */
-function imageInputOf(file: File, copy: Copy): Promise<{ mime: string; data: string; name: string }> {
-  return new Promise((resolve, reject) => {
-    if (file.size > MAX_IMAGE_BYTES) {
-      reject(new Error(copy('material.tooBig', {
-        name: file.name,
-        limit: Math.round(MAX_IMAGE_BYTES / 1024 / 1024),
-      })))
-      return
-    }
-    const reader = new FileReader()
-    reader.onerror = () => reject(new Error(copy('material.unreadable', { name: file.name })))
-    reader.onload = () => {
-      const url = typeof reader.result === 'string' ? reader.result : ''
-      // A data URL is `data:<mime>;base64,<payload>`; both halves are needed,
-      // and a file the browser could not type is refused rather than guessed at.
-      const comma = url.indexOf(',')
-      const header = url.slice(0, comma)
-      const mime = /^data:([^;,]+)/.exec(header)?.[1]
-      if (comma < 0 || mime === undefined) {
-        reject(new Error(copy('material.notImage', { name: file.name })))
-        return
-      }
-      resolve({ mime, data: url.slice(comma + 1), name: file.name })
-    }
-    reader.readAsDataURL(file)
-  })
 }
 
 /** Whatever the pointer's x means along a bar. */
@@ -755,8 +726,6 @@ function materialsLabel(materials: readonly Material[], copy: Copy): string {
   const images = materials.filter(material => material.kind === 'image')
   const bytes = images.reduce((sum, image) => sum + (image.bytes ?? 0), 0)
   if (materials.length === 0) return copy('material.none')
-  const size = bytes === 0
-    ? ''
-    : ` · ${bytes > 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`}`
+  const size = bytes === 0 ? '' : ` · ${byteSizeText(bytes)}`
   return `${copy('material.counts', { texts, images: images.length })}${size}`
 }

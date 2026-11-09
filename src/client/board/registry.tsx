@@ -13,9 +13,11 @@ import { useReducer, useState, type JSX, type PointerEvent as ReactPointerEvent 
 import type { MediaInput, MediaPatch, TaskInput, TaskPatch } from '../api.ts'
 import { useCopy, type Copy } from '../copy/index.tsx'
 import type { CopyKey } from '../copy/table.ts'
-import type { MediaEntry, TaskEntry, TaskState } from '../types.ts'
+import type { Material, MediaEntry, TaskEntry, TaskState } from '../types.ts'
 import { IDLE, editor, isAdding, isEditing, type EditorAction, type EditorState } from './editor-state.ts'
 import { FieldForm, type FieldSpec } from './fields.tsx'
+import { useMaterialSection } from './materials-field.tsx'
+import type { MaterialOp } from './materials-form.ts'
 import { dueLevelOf, fractionText, formatCheckpoints, mediaStatusLabel, parseCheckpoints, percentOf, timeOf, weekEndKey } from './format.ts'
 import { byDeadline } from './task-order.ts'
 import { IconButton, Tile, TileHead } from './tile.tsx'
@@ -251,6 +253,22 @@ export function MediaTile({ media, busy, onAdd, onPatch, onRemove, onFocus }: Me
         <IconButton label={t('media.add')} disabled={busy} onClick={() => dispatch({ kind: 'open-add' })}>＋</IconButton>
       </TileHead>
 
+      {/* First, not last: the list is long and often opened to add to it. */}
+      {isAdding(mode)
+        ? (
+          <FieldForm
+            fields={fields}
+            submitLabel={t('media.record')}
+            busy={busy}
+            onSubmit={(payload) => {
+              onAdd(mediaInput(payload))
+              dispatch({ kind: 'close' })
+            }}
+            onCancel={() => dispatch({ kind: 'close' })}
+          />
+        )
+        : null}
+
       {media.length === 0 && mode.kind === 'idle'
         ? <span className="pt-muted">{t('media.emptyHint')}</span>
         : null}
@@ -266,21 +284,6 @@ export function MediaTile({ media, busy, onAdd, onPatch, onRemove, onFocus }: Me
           {settled.map(renderEntry)}
         </details>
       )}
-
-      {isAdding(mode)
-        ? (
-          <FieldForm
-            fields={fields}
-            submitLabel={t('media.record')}
-            busy={busy}
-            onSubmit={(payload) => {
-              onAdd(mediaInput(payload))
-              dispatch({ kind: 'close' })
-            }}
-            onCancel={() => dispatch({ kind: 'close' })}
-          />
-        )
-        : null}
     </Tile>
   )
 }
@@ -291,11 +294,22 @@ export interface TaskTileProps {
   /** The current habit day: what "this week's end" is measured from. */
   readonly today: string
   readonly busy: boolean
-  readonly onAdd: (input: TaskInput) => void
+  /**
+   * Create a task and then land the materials the form staged.
+   *
+   * One callback rather than two, because the second half needs the id the first
+   * half only reveals: a new task has no materials area to write into until the
+   * host has made the entry.
+   */
+  readonly onCreate: (input: TaskInput, ops: readonly MaterialOp[]) => Promise<void>
   readonly onPatch: (id: string, patch: TaskPatch) => void
+  /** Save an edited task, then land the materials its form staged. */
+  readonly onEdit: (id: string, patch: TaskPatch, ops: readonly MaterialOp[]) => Promise<void>
   readonly onRemove: (id: string) => void
   /** Opens one entry in focus mode. */
   readonly onFocus: (entry: TaskEntry) => void
+  /** Where a stored material's bytes come from — the client owns that URL. */
+  readonly assetUrl?: (assetId: string) => string
 }
 
 /** The deadline as the row shows it: "today" when it is, else `MM-DD`. */
@@ -544,11 +558,55 @@ function isArchived(task: TaskEntry, today: string): boolean {
 }
 
 /**
+ * The task editor: a field form plus the material area it stages.
+ *
+ * A component of its own because the staging is per-open-form state. Mounting it
+ * while the editor is open and unmounting it on close is what makes reopening
+ * start again from the entry, instead of from the last, abandoned attempt.
+ */
+function TaskForm(props: {
+  readonly fields: readonly FieldSpec[]
+  readonly initial?: Record<string, unknown>
+  readonly submitLabel: string
+  readonly busy: boolean
+  /** The entry's stored materials; empty for a task being created. */
+  readonly existing?: readonly Material[]
+  readonly assetUrl?: (assetId: string) => string
+  readonly validate?: (payload: Record<string, unknown>) => string | undefined
+  readonly onSubmit: (payload: Record<string, unknown>, ops: readonly MaterialOp[]) => void
+  readonly onCancel: () => void
+}): JSX.Element {
+  const { fields, initial, submitLabel, busy, existing, assetUrl, validate, onSubmit, onCancel } = props
+  const [problem, setProblem] = useState<string | null>(null)
+  const materials = useMaterialSection({
+    initial: existing ?? [],
+    ...(assetUrl === undefined ? {} : { assetUrl }),
+    onProblem: setProblem,
+    busy,
+  })
+  return (
+    <>
+      <FieldForm
+        fields={fields}
+        {...(initial === undefined ? {} : { initial })}
+        submitLabel={submitLabel}
+        busy={busy}
+        {...(validate === undefined ? {} : { validate })}
+        materials={materials}
+        onSubmit={onSubmit}
+        onCancel={onCancel}
+      />
+      {problem === null ? null : <div className="pt-error">{problem}</div>}
+    </>
+  )
+}
+
+/**
  * Tasks and homework: due soonest first, with the derived state shown. The
  * order itself belongs to `./task-order.ts`, because the daily report reads the
  * registry in it too.
  */
-export function TaskTile({ tasks, today, busy, onAdd, onPatch, onRemove, onFocus }: TaskTileProps): JSX.Element {
+export function TaskTile({ tasks, today, busy, onCreate, onPatch, onEdit, onRemove, onFocus, assetUrl }: TaskTileProps): JSX.Element {
   const t = useCopy()
   const [mode, dispatch] = useEditor(tasks.map(task => task.id))
   const open = tasks.filter(task => task.state !== 'done').length
@@ -562,7 +620,7 @@ export function TaskTile({ tasks, today, busy, onAdd, onPatch, onRemove, onFocus
   /** One task, as the open editor or as its row — the same in either list. */
   const renderTask = (task: TaskEntry): JSX.Element => (isEditing(mode, task.id)
     ? (
-      <FieldForm
+      <TaskForm
         key={task.id}
         fields={fields}
         initial={{
@@ -574,11 +632,13 @@ export function TaskTile({ tasks, today, busy, onAdd, onPatch, onRemove, onFocus
           checkpoints: formatCheckpoints(task.checkpoints),
           notes: task.notes,
         }}
+        existing={task.materials}
+        {...(assetUrl === undefined ? {} : { assetUrl })}
         validate={payload => taskFormProblem(payload, t)}
         submitLabel={t('form.save')}
         busy={busy}
-        onSubmit={(payload) => {
-          onPatch(task.id, taskPatch(payload, task, t))
+        onSubmit={(payload, ops) => {
+          void onEdit(task.id, taskPatch(payload, task, t), ops)
           dispatch({ kind: 'close' })
         }}
         onCancel={() => dispatch({ kind: 'close' })}
@@ -610,6 +670,24 @@ export function TaskTile({ tasks, today, busy, onAdd, onPatch, onRemove, onFocus
         <IconButton label={t('task.add')} disabled={busy} onClick={() => dispatch({ kind: 'open-add' })}>＋</IconButton>
       </TileHead>
 
+      {/* First, not last: the list is long and often opened to add to it. */}
+      {isAdding(mode)
+        ? (
+          <TaskForm
+            fields={newTaskFields(today, t)}
+            validate={payload => taskFormProblem(payload, t)}
+            submitLabel={t('tile.newEntry')}
+            busy={busy}
+            {...(assetUrl === undefined ? {} : { assetUrl })}
+            onSubmit={(payload, ops) => {
+              void onCreate(taskInput(payload, t), ops)
+              dispatch({ kind: 'close' })
+            }}
+            onCancel={() => dispatch({ kind: 'close' })}
+          />
+        )
+        : null}
+
       {tasks.length === 0 && mode.kind === 'idle' ? <span className="pt-muted">{t('task.empty')}</span> : null}
       {tasks.length > 0 && live.length === 0 && mode.kind === 'idle'
         ? <span className="pt-muted">{t('task.noneLive')}</span>
@@ -623,22 +701,6 @@ export function TaskTile({ tasks, today, busy, onAdd, onPatch, onRemove, onFocus
           {archived.map(renderTask)}
         </details>
       )}
-
-      {isAdding(mode)
-        ? (
-          <FieldForm
-            fields={newTaskFields(today, t)}
-            validate={payload => taskFormProblem(payload, t)}
-            submitLabel={t('tile.newEntry')}
-            busy={busy}
-            onSubmit={(payload) => {
-              onAdd(taskInput(payload, t))
-              dispatch({ kind: 'close' })
-            }}
-            onCancel={() => dispatch({ kind: 'close' })}
-          />
-        )
-        : null}
     </Tile>
   )
 }

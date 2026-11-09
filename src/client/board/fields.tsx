@@ -9,6 +9,8 @@
 import { useState, type JSX } from 'react'
 import { useCopy, type Copy } from '../copy/index.tsx'
 import { initialValuesOf } from './form-values.ts'
+import type { MaterialSection } from './materials-field.tsx'
+import type { MaterialOp } from './materials-form.ts'
 
 /** One input in a compact form. */
 export interface FieldSpec {
@@ -67,7 +69,8 @@ export interface FieldFormProps {
   readonly initial?: Record<string, unknown>
   readonly submitLabel: string
   readonly busy: boolean
-  readonly onSubmit: (payload: Record<string, unknown>) => void
+  /** The payload, plus the material writes the form's own section implies. */
+  readonly onSubmit: (payload: Record<string, unknown>, ops: readonly MaterialOp[]) => void
   readonly onCancel?: () => void
   /**
    * Cross-field validation, for rules no single field can see (a checkpoint
@@ -75,11 +78,20 @@ export interface FieldFormProps {
    * checks; returning a string is the form's error line.
    */
   readonly validate?: (payload: Record<string, unknown>) => string | undefined
+  /**
+   * An optional material area, and the handlers that let a paste or a drop
+   * *anywhere in this form* — the notes box included — land in it.
+   *
+   * Absent for every form that takes no materials, and that absence is
+   * load-bearing: without it the form attaches no listeners at all, so a
+   * screenshot pasted elsewhere on the page keeps going where it always went.
+   */
+  readonly materials?: MaterialSection
 }
 
 /** Render the form. */
 export function FieldForm({
-  fields, initial, submitLabel, busy, onSubmit, onCancel, validate,
+  fields, initial, submitLabel, busy, onSubmit, onCancel, validate, materials,
 }: FieldFormProps): JSX.Element {
   const t = useCopy()
   // `initial` fills a field being edited; the field's own `defaultValue` is what
@@ -100,7 +112,7 @@ export function FieldForm({
       return
     }
     setProblem(null)
-    onSubmit(payload)
+    onSubmit(payload, materials?.ops ?? [])
   }
 
   const set = (name: string, value: string): void => {
@@ -108,7 +120,12 @@ export function FieldForm({
   }
 
   return (
-    <div className="pt-form">
+    <div
+      className="pt-form"
+      onPaste={materials?.onPaste}
+      onDrop={materials?.onDrop}
+      onDragOver={materials?.onDragOver}
+    >
       {fields.map(field => (
         <label
           className={field.wide === true ? 'pt-field pt-field-wide' : 'pt-field'}
@@ -155,6 +172,7 @@ export function FieldForm({
               )}
         </label>
       ))}
+      {materials?.node}
       <div className="pt-form-actions">
         <button className="pt-btn pt-btn-primary" disabled={busy} onClick={submit}>{submitLabel}</button>
         {onCancel === undefined ? null : <button className="pt-btn" onClick={onCancel}>{t('form.cancel')}</button>}

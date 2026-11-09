@@ -12,6 +12,7 @@
  */
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react'
 import {
+  type EntryAnswer,
   type HabitClient,
   type MediaInput,
   type MediaPatch,
@@ -28,6 +29,7 @@ import { DateNav } from './DateNav.tsx'
 import { EquipmentCard, FreeCard, PlankCard, PullupCard, RopeTile, RunTile } from './fitness.tsx'
 import type { RegistryEntry } from './focus.ts'
 import { fractionText, messageOf } from './format.ts'
+import { applyMaterialWrites, type MaterialOp } from './materials-form.ts'
 import { habitLabel } from './names.ts'
 import { MediaTile, TaskTile } from './registry.tsx'
 import { dayReport } from './report.ts'
@@ -257,6 +259,27 @@ export function BoardBody({
     return answer.day === undefined ? await client.state(date) : answer
   })
 
+  /**
+   * Create or patch a task, then land the materials its form staged.
+   *
+   * The second half needs the id the first half only just returned, so this is
+   * deliberately two writes in one adopted answer: the form hands its plan here
+   * instead of issuing it, because the board is what holds the day and the
+   * client. A material that fails leaves the task saved and says so — the next
+   * attempt is "open it and add the file again", never "the task is gone".
+   */
+  const writeTask = async (
+    action: () => Promise<EntryAnswer>,
+    ops: readonly MaterialOp[],
+  ): Promise<void> => {
+    await act(async () => {
+      const answer = await action()
+      const id = answer.entry?.id
+      if (id === undefined || ops.length === 0) return answer
+      return (await applyMaterialWrites(ops, 'task', id, client, { date })) ?? answer
+    })
+  }
+
   /** Show the copy confirmation for a moment, restarting the timer if due. */
   const flashCopied = (): void => {
     setCopied(true)
@@ -391,10 +414,14 @@ export function BoardBody({
           tasks={state?.tasks ?? []}
           today={clock.today}
           busy={busy}
-          onAdd={(input: TaskInput) => registryAct(() => client.addTask(input, { date }))}
+          onCreate={(input: TaskInput, ops: readonly MaterialOp[]) =>
+            writeTask(() => client.addTask(input, { date }), ops)}
           onPatch={(id, patch: TaskPatch) => registryAct(() => client.patchTask(id, patch, { date }))}
+          onEdit={(id, patch: TaskPatch, ops: readonly MaterialOp[]) =>
+            writeTask(() => client.patchTask(id, patch, { date }), ops)}
           onRemove={id => registryAct(() => client.removeTask(id, { date }))}
           onFocus={onOpenFocus}
+          assetUrl={id => client.assetUrl(id)}
         />
 
         {record === null ? (

@@ -296,6 +296,51 @@ body[data-ds-dark-theme] .pt-track {
 .pt-field-wide textarea { resize: vertical; min-height: 3em; line-height: 1.5; }
 .pt-form-actions { display: flex; gap: 5px; }
 
+/*
+ * ---- the material area inside the task form --------------------------
+ *
+ * The cards themselves are focus mode's own (pt-fo-md, pt-fo-drop): it is the
+ * same thing being edited, so it is the same thing being shown. Only the
+ * container and the image row are new. A stored image is one row here rather
+ * than a full-width picture — a form is a place to attach something and move on,
+ * and the picture is a click away.
+ */
+.pt-attach {
+  flex: 1 1 100%; display: flex; flex-direction: column; gap: 7px;
+  padding-top: 5px; border-top: 1px dashed var(--pt-line);
+}
+.pt-attach .pt-fo-drop { padding: 7px 10px; font-size: 11.5px; }
+/* border-box because the row is width:100% *and* carries padding and a border:
+   without it the row is 16px wider than the form it sits in. */
+.pt-mat-row {
+  box-sizing: border-box;
+  display: flex; align-items: center; gap: 8px; min-width: 0; width: 100%;
+  border: 1px solid var(--pt-line); border-radius: 10px;
+  padding: 5px 7px; background: var(--pt-surface);
+}
+.pt-mat-row:hover { border-color: var(--pt-line-strong); }
+.pt-mat-thumb {
+  flex: none; width: 46px; height: 34px; object-fit: cover; cursor: zoom-in;
+  border: 1px solid var(--pt-line); border-radius: 6px; background: var(--pt-surface-2);
+}
+.pt-mat-name {
+  flex: 1 1 auto; min-width: 0; font-size: 12px; cursor: zoom-in;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pt-mat-size {
+  flex: none; font-size: 11px; opacity: .6; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.pt-zoom {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 10px; border-radius: 10px; background: var(--pt-surface-2);
+}
+.pt-zoom img {
+  box-sizing: border-box;
+  max-width: 100%; border-radius: 8px; cursor: zoom-out;
+  border: 1px solid var(--pt-line-strong);
+}
+.pt-zoom-hint { font-size: 11px; opacity: .55; }
+
 /* ---- registry badges ------------------------------------------------- */
 .pt-badge {
   display: inline-block; padding: 0 5px; border-radius: 5px; font-size: 10px;
