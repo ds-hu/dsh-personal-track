@@ -44,10 +44,11 @@ images, added by paste or drop). Entering starts a **focus session**, leaving en
 durations are derived from the two instants, and a session left open by a crash does not
 count.
 
-**The focus column is derived**: it shows the closed session with the latest start
-across every entry — nothing stored, nothing in browser storage — so a reload, another
-tab or a deleted entry all answer the same way. It has no ×: to change the card, focus on
-something else.
+**The focus column is a todo list**: type a line and press Enter, and the box ticks off that
+todo alone — it moves no task's progress and no task ticks it off. Below it is a **derived**
+"focused on" half: the tasks and titles that carry focus time, most recently worked on
+first; click a title to open focus mode. Neither half remembers anything in browser storage,
+so a reload, another tab or a deleted entry all answer the same way.
 
 **Copy as plain text** flattens the day you are looking at into a few lines that paste
 into a chat: the completion figure, one line per group, then the task list (everything

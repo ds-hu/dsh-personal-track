@@ -65,7 +65,7 @@ pnpm verify       # 先构建，再跑 verify-client（facade）+ verify-host（
 - **改了 `src/host/domain.ts` 的 `version` 就必须把旧版本列进 `compatibleVersions`**：
   per-record 后端对不接受的版本是**丢弃**而不是迁移——不列就等于删历史。
 - **上限判定用同一个单位**：图片上限按**解码后字节数**比（base64 长度比它粗最多 3 字节）。
-- **写入只有一种答复形状**：它改动的**习惯日 slice**（`day`/`stock`/`tasks`/`media`）加这次写独有的
+- **写入只有一种答复形状**：它改动的**习惯日 slice**（`day`/`stock`/`tasks`/`media`/`todos`）加这次写独有的
   事实（`entry`、`sessionId`、`removed`、`report`）。**登记**的写带一个"视点日"（`date`，默认今天）。
   素材清扫是唯一例外（`{ok, removed}`）。登记写回的 `entry` 是**视图**（带派生的 `mime`、
   `focusSeconds`、`state`），不是存储记录——发错会让专注模式把图片判成缺失、专注时长变 `NaN`。
