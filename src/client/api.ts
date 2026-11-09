@@ -16,6 +16,7 @@ import type {
   StateView,
   StatsView,
   TaskEntry,
+  TodoEntry,
 } from './types.ts'
 
 /** The route prefix this plugin owns on the GUI host. */
@@ -231,17 +232,24 @@ export interface Viewpoint {
 /**
  * A write's answer: the day's state slice, plus the entry it changed.
  *
- * Every mutation answers this shape — the day, the stock and both registries —
- * so there is one adoption path, not one per route family. The entry is the
- * state slice's shape and not the stored record: an image material carries the
- * mime and the byte size derived from its asset, and the entry carries its
- * derived `focusSeconds`, so adopting a record would show up as missing images
- * and a zero focus total. Focus mode adopts this whole, which is why the
- * distinction is stated here.
+ * Every mutation answers this shape — the day, the stock and all three
+ * registries — so there is one adoption path, not one per route family. The
+ * entry is the state slice's shape and not the stored record: an image material
+ * carries the mime and the byte size derived from its asset, and the entry
+ * carries its derived `focusSeconds`, so adopting a record would show up as
+ * missing images and a zero focus total. Focus mode adopts this whole, which is
+ * why the distinction is stated here.
  */
 export interface EntryAnswer extends StateView {
-  /** The changed entry, in the state slice's shape. */
-  readonly entry?: TaskEntry | MediaEntry
+  /**
+   * The changed entry, in the state slice's shape.
+   *
+   * All three registry kinds answer here, a todo included: `addTodo` answers
+   * with `{ id, title, done }`, which neither `TaskEntry` nor `MediaEntry` can
+   * hold. A consumer that narrows on this union has to name the third one as
+   * well, because the host really does emit it.
+   */
+  readonly entry?: TaskEntry | MediaEntry | TodoEntry
 }
 
 /** A delete's answer: the day's slice, plus whether anything was actually there. */

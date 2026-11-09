@@ -16,8 +16,9 @@
  */
 import { strict as assert } from 'node:assert'
 import { createChecker } from './support.ts'
-import { HabitApiError, createHabitClient } from '../src/client/api.ts'
+import { HabitApiError, createHabitClient, type EntryAnswer } from '../src/client/api.ts'
 import { API_PREFIX, routes, urlOf, type RouteName } from '../src/shared/route.ts'
+import type { TodoEntry } from '../src/client/types.ts'
 
 const checker = createChecker('the client ↔ host contract')
 const { check, checkAsync, report } = checker
@@ -101,6 +102,19 @@ check('every route in the table is exercised by this test', () => {
   const declared = Object.keys(routes).sort()
   const covered = CALLS.map(([name]) => name).sort()
   assert.deepEqual(covered, declared, 'a new route must be asserted here, not merely added to the table')
+})
+
+// The third member of the write answer's union, asserted where a compiler reads
+// it. `addTodo` really answers `{ id, title, done }`, which neither `TaskEntry`
+// nor `MediaEntry` can hold; until this line existed nothing in the tree ever put
+// a todo into `EntryAnswer['entry']`, so the union could lose it without a
+// murmur and the next consumer would fall through its own narrowing at runtime.
+check('a write answer can hold every registry kind the host answers with', () => {
+  const todo: TodoEntry = {
+    id: 'd1', title: '待办', done: false, createdAt: 'c', materials: [], focusSessions: [], focusSeconds: 0,
+  }
+  const entry: EntryAnswer['entry'] = todo
+  assert.equal(entry.title, '待办')
 })
 
 await checkAsync('one note writer, three paths: each registry writes its own note', async () => {
