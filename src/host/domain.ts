@@ -271,8 +271,35 @@ export const taskRecord = z.object({
 /** One task. */
 export type TaskRecord = z.infer<typeof taskRecord>
 
+/**
+ * One todo: the smallest registry entry, a line on the left column's list.
+ *
+ * Deliberately **not** a task. A task's completion is derived from its progress
+ * axis, so a todo that *were* a task would either need a progress it does not
+ * have or be ticked off by a rule about numbers. Here `done` is its own fact:
+ * ticking a todo moves no task's bar, and finishing a task ticks nothing off.
+ *
+ * What it does share with the other registries is everything else — notes,
+ * materials, focus sessions — because focusing on "买挂钩" is the same act as
+ * focusing on a task, and a second implementation of that would be a second
+ * vocabulary for the same thing.
+ */
+export const todoRecord = z.object({
+  id: sessionId,
+  title: z.string().min(1),
+  done: z.boolean().default(false),
+  /** The instant it was ticked; kept in step with `done` by the store. */
+  completedAt: z.string().optional(),
+  notes: z.string().optional(),
+  createdAt: z.string(),
+  ...registryExtras,
+})
+
+/** One todo. */
+export type TodoRecord = z.infer<typeof todoRecord>
+
 /** Either kind of registry entry, as stored. */
-export type RegistryRecord = MediaRecord | TaskRecord
+export type RegistryRecord = MediaRecord | TaskRecord | TodoRecord
 
 /**
  * One stored image: the only place material bytes live.
@@ -324,6 +351,7 @@ export const habitDomainSpec = defineDomain({
     counters: domainTable<'laundry', CounterRecord>(counterRecord),
     media: domainTable<string, MediaRecord>(mediaRecord),
     tasks: domainTable<string, TaskRecord>(taskRecord),
+    todos: domainTable<string, TodoRecord>(todoRecord),
     assets: domainTable<string, AssetRecord>(assetRecord),
   },
 })

@@ -14,10 +14,10 @@
  */
 import type { Copy } from '../copy/index.tsx'
 import { weekdayNameOf } from './format.ts'
-import type { MediaEntry, RegistryKind, StateView, TaskEntry } from '../types.ts'
+import type { MediaEntry, RegistryKind, StateView, TaskEntry, TodoEntry } from '../types.ts'
 
-/** Either registry entry, as the focus surfaces handle them. */
-export type RegistryEntry = TaskEntry | MediaEntry
+/** Any registry entry, as the focus surfaces handle them. */
+export type RegistryEntry = TaskEntry | MediaEntry | TodoEntry
 
 /**
  * The entry focus mode is open on, right now.
@@ -31,9 +31,19 @@ export interface FocusTarget {
   readonly id: string
 }
 
-/** Which registry an entry came from — the entry itself carries the answer. */
+/**
+ * Which registry an entry came from.
+ *
+ * Each shape carries a field no other one does: a task's derived `state`, a
+ * media entry's `status`, a todo's own `done`.
+ *
+ * @param entry - any registry entry.
+ * @returns the registry it belongs to.
+ */
 export function kindOf(entry: RegistryEntry): RegistryKind {
-  return 'state' in entry ? 'task' : 'media'
+  if ('state' in entry) return 'task'
+  if ('status' in entry) return 'media'
+  return 'todo'
 }
 
 /** The focus target for an entry. */
@@ -75,8 +85,12 @@ export function withEntry(state: StateView, entry: RegistryEntry): StateView {
     if (!state.tasks.some(task => task.id === entry.id)) return state
     return { ...state, tasks: state.tasks.map(task => (task.id === entry.id ? entry : task)) }
   }
-  if (!state.media.some(item => item.id === entry.id)) return state
-  return { ...state, media: state.media.map(item => (item.id === entry.id ? entry : item)) }
+  if ('status' in entry) {
+    if (!state.media.some(item => item.id === entry.id)) return state
+    return { ...state, media: state.media.map(item => (item.id === entry.id ? entry : item)) }
+  }
+  if (!state.todos.some(todo => todo.id === entry.id)) return state
+  return { ...state, todos: state.todos.map(todo => (todo.id === entry.id ? entry : todo)) }
 }
 
 /**

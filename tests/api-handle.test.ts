@@ -430,6 +430,54 @@ await checkAsync('checkpoints travel as content and follow the progress over HTT
   assert.equal(after.status, 200, 'with the stages gone, the total may go too')
 })
 
+// --- todos: the left column's list ------------------------------------------
+
+await checkAsync('a todo is its own record: ticking it moves no task, and it can be focused', async () => {
+  const api = createHarness()
+  const task = await api.state('POST', '/tasks', { title: '线代作业', progress: { total: 4 } })
+  const taskId = (task.entry as { id: string }).id
+
+  const added = await api.state('POST', '/todos', { title: '买挂钩' })
+  const todo = added.entry as { id: string; done: boolean; completedAt?: string }
+  assert.equal(todo.done, false, 'a new todo starts open')
+  assert.equal(todo.completedAt, undefined, 'and carries no completion instant')
+
+  const ticked = await api.state('PATCH', '/todos', { id: todo.id, patch: { done: true } })
+  const done = ticked.entry as { done: boolean; completedAt?: string }
+  assert.equal(done.done, true)
+  assert.equal(typeof done.completedAt, 'string', 'ticking stamps its own instant')
+
+  const unticked = await api.state('PATCH', '/todos', { id: todo.id, patch: { done: false } })
+  assert.equal(
+    (unticked.entry as { completedAt?: string }).completedAt,
+    undefined,
+    'unticking drops the fact again, like a task coming back below its total',
+  )
+
+  // The task's own axis is untouched by any of it: this is the whole reason a
+  // todo is a third registry rather than a task with fewer fields.
+  const state = await api.state('GET', `/state?date=${DATE}`)
+  const view = state as unknown as {
+    tasks: { id: string; progress: { current: number } }[]
+    todos: { id: string }[]
+  }
+  assert.equal(view.tasks.find(entry => entry.id === taskId)?.progress.current, 0, 'a tick is not a task write')
+  assert.equal(view.todos.length, 1, 'and the slice carries the list')
+
+  // A todo is a registry entry like the other two: focus and materials work.
+  const focused = await api.state('POST', '/focus', { kind: 'todo', id: todo.id })
+  const sessionId = (focused as { sessionId: string }).sessionId
+  assert.equal(typeof sessionId, 'string', 'a todo can be sat down with')
+  await api.state('PATCH', '/focus', { kind: 'todo', id: todo.id, sessionId })
+  const block = await api.entry('POST', '/material', { kind: 'todo', id: todo.id, text: '## 清单' })
+  assert.equal((block.materials as { text?: string }[])[0]?.text, '## 清单')
+
+  const removed = await api.state('DELETE', `/todos?date=${DATE}&id=${todo.id}`)
+  assert.equal((removed as { removed: boolean }).removed, true)
+  const after = await api.state('GET', `/state?date=${DATE}`)
+  assert.deepEqual((after as unknown as { todos: unknown[] }).todos, [], 'a deleted todo is gone')
+})
+
 // --- materials and focus mode ------------------------------------------------
 
 /** One tiny PNG, base64: the smallest thing that is still an image payload. */

@@ -519,12 +519,25 @@ await rm(BACKUP_ROOT, { recursive: true, force: true })
 await mkdir(BACKUP_ROOT, { recursive: true })
 
 const source = await mount()
+// The left column's list is a registry of its own: a title, its own `done`, and
+// the same materials/focus machinery the other two get.
+const addedTodo = await source.call('POST', '/todos', { title: '买挂钩' })
+assert.equal(addedTodo.status, 200)
+assert.equal(addedTodo.body.entry.title, '买挂钩', 'a todo answers with its own entry')
+const tickedTodo = await source.call('PATCH', '/todos', {
+  id: addedTodo.body.entry.id, patch: { done: true },
+})
+assert.equal(tickedTodo.body.entry.done, true)
+assert.equal(typeof tickedTodo.body.entry.completedAt, 'string', 'ticking stamps its instant')
+console.log('todos ✓  (a title and its own done, beside the two registries)')
+
 const backup = (await source.call('GET', '/backup')).body.backup
 assert.equal(backup.format, 'personal-track/backup')
-assert.equal(backup.version, 3)
+assert.equal(backup.version, 4, 'the column’s todos moved the file layout to 4')
 assert.equal(backup.days.length, 1, 'the saved day is in the backup')
 assert.equal(backup.days[0].date, DATE)
 assert.equal(backup.tasks.length, 2)
+assert.equal(backup.todos.length, 1, 'the column’s list travels with the file too')
 assert.equal(backup.media.length, 0, 'the hard-deleted book is not in the backup')
 assert.equal(backup.counters.laundry.pending, 2, 'the laundry stock travels with the file')
 assert.equal(backup.assets.length, 1, 'and so do the material images')
@@ -554,6 +567,9 @@ assert.equal(restoredDay.day.progress.done, 5, 'every cell is recomputed from th
 assert.equal(restoredDay.day.vocab.ratio, 0, 'progress is recomputed, not read from the file')
 assert.deepEqual(restoredDay.day.target, { new: 10, review: 5 }, 'the target snapshot survives')
 assert.equal(restoredDay.tasks.find(task => task.id === lateId)?.state, 'done', 'derived task state comes back')
+assert.equal(restoredDay.todos.length, 1, 'the todo came back with the file')
+assert.equal(restoredDay.todos[0].title, '买挂钩')
+assert.equal(restoredDay.todos[0].done, true, 'a done is a stored fact, so it survives the trip')
 
 // The image's bytes came back with the file: a material is only a reference,
 // so a restore that lost them would have to say so rather than draw nothing.

@@ -7,17 +7,17 @@
  * keeps owning its own shown day. Focus mode itself is an overlay rendered from
  * here, over whichever view is up.
  *
- * The column's item is **derived**, not remembered: `recentFocus` reads the
- * closed sessions every entry already carries, so the card is the same in every
- * tab and survives a reload without any browser-local state.
+ * The column's two lists are both **derived or direct, never remembered**: the
+ * todos are records the host stores, and the "focused on" rows are read off the
+ * closed sessions every entry already carries — so the column is the same in
+ * every tab and survives a reload without any browser-local state.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react'
 import type { HabitClient } from '../api.ts'
-import { recentFocus } from '../../shared/focus-session.ts'
 import { CopyProvider, useCopy } from '../copy/index.tsx'
 import type { CopyKey } from '../copy/table.ts'
 import type { LocaleService } from '../locale.ts'
-import type { ClockView, StateView } from '../types.ts'
+import type { ClockView, StateView, TodoEntry } from '../types.ts'
 import { BoardBody } from './BoardBody.tsx'
 import { FocusColumn } from './FocusColumn.tsx'
 import { FocusOverlay } from './FocusOverlay.tsx'
@@ -59,10 +59,14 @@ function Panel({ client }: { readonly client: HabitClient }): JSX.Element {
   const [clock, setClock] = useState<ClockView | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [focused, setFocused] = useState<FocusTarget | null>(null)
+  /** True while a todo write is in flight; the column's box and input rest. */
+  const [todoBusy, setTodoBusy] = useState(false)
   /** Bumped when focus mode closes, so the board re-reads the day it shows. */
   const [boardToken, setBoardToken] = useState(0)
   /** Reads issued so far, so an older answer cannot overwrite a newer one. */
   const reads = useRef(0)
+  /** Todo writes in flight, so a fast second tick cannot clear the first's flag. */
+  const pendingWrites = useRef(0)
 
   /** Re-read everything the column and the overlay are built from. */
   const refresh = useCallback(async (): Promise<void> => {
@@ -91,18 +95,24 @@ function Panel({ client }: { readonly client: HabitClient }): JSX.Element {
   }, [refresh])
 
   const entries: readonly RegistryEntry[] = useMemo(
-    () => (snapshot === null ? [] : [...snapshot.tasks, ...snapshot.media]),
+    () => (snapshot === null ? [] : [...snapshot.tasks, ...snapshot.media, ...snapshot.todos]),
     [snapshot],
   )
 
   /**
-   * What the column's card is: the entry whose closed session started last.
+   * The column's derived half: everything that already carries focus time.
    *
-   * Derived from the same lists the board already reads, so the card needs no
-   * request of its own and no browser-local memory — a reload, another tab or a
-   * deleted entry all answer through this one line.
+   * Derived from the entries the panel holds, so a task focused on from the board
+   * appears here without being copied into a todo — and the row can never
+   * disagree with the entry they both come from. Sorted by the time spent,
+   * because that is what this half of the column is a record of.
    */
-  const recent = useMemo(() => recentFocus(entries), [entries])
+  const focusedEntries = useMemo(
+    () => entries
+      .filter(entry => entry.focusSeconds > 0)
+      .sort((a, b) => b.focusSeconds - a.focusSeconds),
+    [entries],
+  )
 
   const entryFor = useCallback(
     (target: FocusTarget | null): RegistryEntry | undefined =>
@@ -142,9 +152,33 @@ function Panel({ client }: { readonly client: HabitClient }): JSX.Element {
    */
   const mergeRegistry = useCallback((next: StateView): void => {
     setSnapshot(previous => (
-      previous === null ? previous : { ...previous, tasks: next.tasks, media: next.media }
+      previous === null
+        ? previous
+        : { ...previous, tasks: next.tasks, media: next.media, todos: next.todos }
     ))
   }, [])
+
+  /**
+   * One todo write, adopting the slice it answers with.
+   *
+   * The column is not the board: it has no day of its own to re-read, and its
+   * answer is already the full slice — so the snapshot is replaced outright and a
+   * failure lands on the panel's error line instead of vanishing.
+   */
+  const writeTodo = useCallback(async (action: () => Promise<StateView>): Promise<void> => {
+    pendingWrites.current += 1
+    setTodoBusy(true)
+    try {
+      const next = await action()
+      setSnapshot(next)
+      setError(null)
+    } catch (cause) {
+      setError(messageOf(cause, t))
+    } finally {
+      pendingWrites.current -= 1
+      if (pendingWrites.current === 0) setTodoBusy(false)
+    }
+  }, [t])
 
   const focusedEntry = entryFor(focused)
   const overdue = snapshot === null ? 0 : snapshot.tasks.filter(task => task.overdue).length
@@ -163,13 +197,19 @@ function Panel({ client }: { readonly client: HabitClient }): JSX.Element {
       {view === 'board' ? (
         <div className="pt-track-body">
           <FocusColumn
-            recent={recent}
+            todos={snapshot?.todos ?? []}
+            focused={focusedEntries}
             today={clock?.today ?? ''}
             night={clock?.nightTail ?? false}
             progress={snapshot?.day.progress}
             remaining={remaining}
             overdue={overdue}
-            onContinue={() => { if (recent !== undefined) setFocused(targetOf(recent.entry)) }}
+            busy={todoBusy}
+            onAdd={title => void writeTodo(() => client.addTodo({ title }))}
+            onToggle={todo => void writeTodo(() => client.patchTodo(todo.id, { done: !todo.done }))}
+            onRemove={todo => void writeTodo(() => client.removeTodo(todo.id))}
+            onFocusTodo={todo => setFocused({ kind: 'todo', id: todo.id })}
+            onFocusEntry={entry => setFocused(targetOf(entry))}
           />
           <BoardBody
             client={client}

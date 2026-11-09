@@ -78,6 +78,16 @@ export const routes = {
   patchTask: { method: 'PATCH', request: '/tasks' },
   removeTask: { method: 'DELETE', request: '/tasks' },
   /**
+   * The left column's todos: a title and its own `done`, nothing derived.
+   *
+   * Separate paths from `/tasks` on purpose — a todo is not a task with a
+   * narrower shape, and a write that crossed the two would be able to move a
+   * task's progress from the column that promises not to.
+   */
+  addTodo: { method: 'POST', request: '/todos' },
+  patchTodo: { method: 'PATCH', request: '/todos' },
+  removeTodo: { method: 'DELETE', request: '/todos' },
+  /**
    * The one route that answers with bytes rather than JSON: `<img src>` points
    * straight at it, so a long screenshot is decoded by the browser's image
    * pipeline and cached by URL instead of travelling through every state slice.

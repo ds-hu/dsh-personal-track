@@ -365,6 +365,17 @@ export const COPY = {
   'focus.openTasks': { zh: '剩余任务', en: 'open' },
   'focus.overdueTasks': { zh: '逾期', en: 'overdue' },
 
+  // ---- the left column's todos -------------------------------------------
+  'todo.title': { zh: '待办', en: 'Todos' },
+  'todo.add': { zh: '新建待办', en: 'Add a todo' },
+  'todo.addHint': { zh: '加一条待办…', en: 'Add a todo…' },
+  'todo.empty': { zh: '还没有待办：在上面写一条，按回车就行', en: 'No todos yet — type one above and press Enter' },
+  'todo.focused': { zh: '专注过', en: 'Focused on' },
+  'todo.focus': { zh: '专注 {duration}', en: '{duration} focused' },
+  'todo.markDone': { zh: '标记完成', en: 'Mark done' },
+  'todo.markUndone': { zh: '取消完成', en: 'Mark not done' },
+  'todo.remove': { zh: '删除这条待办', en: 'Delete this todo' },
+
   // ---- data in and out (export / import / sweep) -----------------------
   'data.title': { zh: '数据', en: 'Data' },
   'data.pending': { zh: '待导入 {name}', en: '{name} to import' },

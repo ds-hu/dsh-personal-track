@@ -22,8 +22,9 @@ import type {
   MediaRecord,
   RegistryRecord,
   TaskRecord,
+  TodoRecord,
 } from './domain.ts'
-import { assetRecord, dayRecord, mediaRecord, taskRecord } from './domain.ts'
+import { assetRecord, dayRecord, mediaRecord, taskRecord, todoRecord } from './domain.ts'
 import { habitOf, type CheckHabit } from './habits.ts'
 import {
   cellProgress,
@@ -73,6 +74,12 @@ export interface StateView {
   readonly stock: CounterRecord
   readonly media: MediaView[]
   readonly tasks: TaskView[]
+  /**
+   * The left column's list. Carried with every slice like the other two
+   * registries: a todo belongs to no habit day, and the column that shows them
+   * is beside a board that is showing *some* day.
+   */
+  readonly todos: TodoView[]
 }
 
 /**
@@ -120,7 +127,20 @@ export interface TaskView extends TaskRecord {
 }
 
 /** Which registry a material or focus session belongs to. */
-export type OwnerKind = 'task' | 'media'
+export type OwnerKind = 'task' | 'media' | 'todo'
+
+/**
+ * A todo as the view carries it.
+ *
+ * Nothing is derived beyond the registry extras: `done` is a stored fact here,
+ * unlike a task's state, which is read off its progress axis. That is the whole
+ * point of the three registries being three — the same column shows a todo you
+ * tick and a task you cannot.
+ */
+export interface TodoView extends Omit<TodoRecord, 'materials'> {
+  readonly materials: MaterialView[]
+  readonly focusSeconds: number
+}
 
 /** One image a caller hands the store; the id and instant are the store's. */
 export interface NewImage {
@@ -185,7 +205,7 @@ export interface HabitStore {
   addSession(key: DayKey, kind: SessionKind, entry: Record<string, unknown>): Promise<DayRecord>
   /** Merge a patch into one session; **跳绳** patches the merged day record. */
   patchSession(key: DayKey, kind: SessionKind, id: string, patch: Record<string, unknown>): Promise<DayRecord>
-  /** Remove one session; **跳绳** clears the whole day's single record. */
+  /** Remove one session: every session kind is a list, one entry at a time. */
   removeSession(key: DayKey, kind: SessionKind, id: string): Promise<DayRecord>
   /** Stock down by `pieces` and one washing session appended. */
   wash(key: DayKey, pieces: number, at: string): Promise<{ day: DayRecord; stock: CounterRecord }>
@@ -199,6 +219,10 @@ export interface HabitStore {
   /** Patch fields; `null` clears one, and completion follows progress. */
   patchTask(id: string, patch: Record<string, unknown>): Promise<TaskRecord>
   deleteTask(id: string): Promise<boolean>
+  putTodo(record: TodoRecord): Promise<void>
+  /** Patch fields; `null` clears one, and `done` keeps `completedAt` in step. */
+  patchTodo(id: string, patch: Record<string, unknown>): Promise<TodoRecord>
+  deleteTodo(id: string): Promise<boolean>
   /** Append one Markdown block to a registry entry's materials. */
   addMaterialText(owner: OwnerKind, id: string, text: string): Promise<void>
   /** Store one image and append it to a registry entry's materials. */
@@ -345,6 +369,7 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
   const counters = domain.table('counters')
   const media = domain.table('media')
   const tasks = domain.table('tasks')
+  const todos = domain.table('todos')
   const assets = domain.table('assets')
 
   /**
@@ -454,12 +479,22 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
     [...entries].sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))
 
   /** The table behind one registry kind, seen through the shared bridge. */
-  const registryTable = (owner: OwnerKind): RegistryTable =>
-    (owner === 'task' ? tasks : media) as unknown as RegistryTable
+  const registryTable = (owner: OwnerKind): RegistryTable => {
+    switch (owner) {
+      case 'task': return tasks as unknown as RegistryTable
+      case 'media': return media as unknown as RegistryTable
+      case 'todo': return todos as unknown as RegistryTable
+    }
+  }
 
   /** Parse a record with the schema of its own registry. */
-  const parseRegistry = (owner: OwnerKind, record: Record<string, unknown>): RegistryRecord =>
-    owner === 'task' ? taskRecord.parse(record) : mediaRecord.parse(record)
+  const parseRegistry = (owner: OwnerKind, record: Record<string, unknown>): RegistryRecord => {
+    switch (owner) {
+      case 'task': return taskRecord.parse(record)
+      case 'media': return mediaRecord.parse(record)
+      case 'todo': return todoRecord.parse(record)
+    }
+  }
 
   /**
    * Read-modify-write one registry entry.
@@ -485,6 +520,15 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
 
   /** A media record as the view carries it: materials joined, focus time derived. */
   function mediaView(record: MediaRecord): MediaView {
+    return {
+      ...record,
+      materials: record.materials.map(materialView),
+      focusSeconds: focusSeconds(record.focusSessions),
+    }
+  }
+
+  /** A todo as the view carries it — `done` is stored, so nothing else moves. */
+  function todoView(record: TodoRecord): TodoView {
     return {
       ...record,
       materials: record.materials.map(materialView),
@@ -548,6 +592,7 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
           materials: record.materials.map(materialView),
           focusSeconds: focusSeconds(record.focusSessions),
         })),
+        todos: byCreatedAtDesc([...todos.entries()].map(([, record]) => record)).map(todoView),
       }
     },
 
@@ -723,6 +768,32 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
       return removed
     },
 
+    putTodo: async input => {
+      await todos.put(input.id, todoRecord.parse(input))
+    },
+
+    patchTodo: (id, patch) => todos.update(id, (current) => {
+      const parsed = todoRecord.parse(withoutCleared({ ...current, ...patch, id }))
+      // `done` is the todo's own fact — not derived from anything — so the
+      // instant it was ticked is kept in step here, the way a task's completion
+      // instant follows its progress. Untick, and the fact goes away.
+      if (parsed.done && parsed.completedAt === undefined) {
+        return { ...parsed, completedAt: now().toISOString() }
+      }
+      if (!parsed.done && parsed.completedAt !== undefined) {
+        const { completedAt: _cleared, ...rest } = parsed
+        return rest
+      }
+      return parsed
+    }),
+
+    deleteTodo: async (id) => {
+      const record = todos.get(id)
+      const removed = await todos.delete(id)
+      await dropAssetsOf(record)
+      return removed
+    },
+
     addMaterialText: async (owner, id, text) => {
       await updateRegistry(owner, id, record => ({
         ...record,
@@ -800,7 +871,7 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
 
     sweepOrphanAssets: async () => {
       const referenced = new Set<string>()
-      for (const table of [tasks, media]) {
+      for (const table of [tasks, media, todos]) {
         for (const [, record] of table.entries()) {
           for (const material of record.materials) {
             if (material.kind === 'image') referenced.add(material.assetId)

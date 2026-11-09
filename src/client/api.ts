@@ -110,6 +110,10 @@ export interface HabitClient {
   addTask(input: TaskInput, viewpoint?: Viewpoint): Promise<EntryAnswer>
   patchTask(id: string, patch: TaskPatch, viewpoint?: Viewpoint): Promise<EntryAnswer>
   removeTask(id: string, viewpoint?: Viewpoint): Promise<RemovedAnswer>
+  /** The left column's list: a title, and `done` as the todo's own fact. */
+  addTodo(input: TodoInput, viewpoint?: Viewpoint): Promise<EntryAnswer>
+  patchTodo(id: string, patch: TodoPatch, viewpoint?: Viewpoint): Promise<EntryAnswer>
+  removeTodo(id: string, viewpoint?: Viewpoint): Promise<RemovedAnswer>
   /**
    * Where an `<img src>` points for one stored image.
    *
@@ -188,6 +192,19 @@ export interface TaskPatch {
   readonly due?: string | null
   readonly progress?: { readonly current?: number; readonly total?: number | null }
   readonly checkpoints?: readonly TaskCheckpointInput[]
+  readonly notes?: string | null
+}
+
+/** Fields a new todo carries: a title, and nothing it has to earn. */
+export interface TodoInput {
+  readonly title: string
+  readonly notes?: string
+}
+
+/** A todo patch; `null` clears the note. `done` is the todo's own fact. */
+export interface TodoPatch {
+  readonly title?: string
+  readonly done?: boolean
   readonly notes?: string | null
 }
 
@@ -420,6 +437,14 @@ export function createHabitClient(options: HabitClientOptions = {}): HabitClient
     removeTask: (id, viewpoint) => request<RemovedAnswer>(
       url('removeTask', { id, ...dayQuery(viewpoint) }),
       { method: routes.removeTask.method },
+    ),
+    addTodo: (input, viewpoint) =>
+      request<EntryAnswer>(url('addTodo'), body('addTodo', withDay(viewpoint, input))),
+    patchTodo: (id, patch, viewpoint) =>
+      request<EntryAnswer>(url('patchTodo'), body('patchTodo', withDay(viewpoint, { id, patch }))),
+    removeTodo: (id, viewpoint) => request<RemovedAnswer>(
+      url('removeTodo', { id, ...dayQuery(viewpoint) }),
+      { method: routes.removeTodo.method },
     ),
     assetUrl: assetId => url('asset', { id: assetId }),
     addImageMaterial: (owner, id, image, viewpoint) => request<EntryAnswer>(

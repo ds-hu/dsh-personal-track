@@ -44,22 +44,27 @@ async function populate(api: Harness): Promise<void> {
     id: 't1', title: '作业', category: '数学', due: NEXT, progress: { current: 1 }, completedAt: '2026-09-16T10:00:00', createdAt: 'c',
   } as never)
   await api.store.putMedia({ id: 'm1', kind: 'book', title: '书', status: 'done', rating: 5, createdAt: 'c' } as never)
+  // The column's own list travels too: a backup that dropped it would be a
+  // backup of everything except what you meant to do.
+  await api.store.putTodo({
+    id: 'd1', title: '买挂钩', done: true, completedAt: '2026-09-16T11:00:00', createdAt: 'c',
+  } as never)
 }
 
 // --- the file's shape --------------------------------------------------------
 
-await checkAsync('the bundle carries identity, a version and the five fact tables', async () => {
+await checkAsync('the bundle carries identity, a version and the six fact tables', async () => {
   const api = createHarness()
   await populate(api)
   const bundle = api.backup.exportAll('2026-09-16T21:00:00Z')
   assert.deepEqual(
     Object.keys(bundle).sort(),
-    ['assets', 'counters', 'days', 'exportedAt', 'format', 'media', 'tasks', 'version'],
-    'no sixth table, and nothing derived alongside them',
+    ['assets', 'counters', 'days', 'exportedAt', 'format', 'media', 'tasks', 'todos', 'version'],
+    'no seventh table, and nothing derived alongside them',
   )
   assert.equal(bundle.format, BACKUP_FORMAT)
   assert.equal(bundle.version, BACKUP_VERSION)
-  assert.equal(bundle.version, 3, 'free training is why the file layout moved to 3')
+  assert.equal(bundle.version, 4, 'the left column’s todos are why the file layout moved to 4')
   assert.equal(bundle.exportedAt, '2026-09-16T21:00:00Z')
 })
 
@@ -231,7 +236,7 @@ await checkAsync('merge overwrites the keys the file carries and keeps the rest'
   const api = createHarness()
   await populate(api)
   const report0 = await api.backup.importAll(smallBundle(), 'merge')
-  assert.deepEqual(report0, { mode: 'merge', days: 1, media: 0, tasks: 0, counters: 1, assets: 0, removed: 0 })
+  assert.deepEqual(report0, { mode: 'merge', days: 1, media: 0, tasks: 0, todos: 0, counters: 1, assets: 0, removed: 0 })
 
   const after = api.backup.exportAll('x')
   assert.equal(after.counters.laundry!.pending, 7, 'the counter was overwritten')
@@ -245,12 +250,13 @@ await checkAsync('replace also drops every record the file omits, and counts the
   const api = createHarness()
   await populate(api)
   const report0 = await api.backup.importAll(smallBundle(), 'replace')
-  assert.equal(report0.removed, 2, 'the task and the media entry went')
+  assert.equal(report0.removed, 3, 'the task, the media entry and the todo went')
 
   const after = api.backup.exportAll('x')
   assert.deepEqual(after.days.map(day => day.date), [DATE], 'the day the file omits is gone')
   assert.deepEqual(after.tasks, [])
   assert.deepEqual(after.media, [])
+  assert.deepEqual(after.todos, [], 'and so does the column’s list')
 })
 
 await checkAsync('replace keeps a counter the file omits out of the result, and reads zero', async () => {
@@ -258,9 +264,9 @@ await checkAsync('replace keeps a counter the file omits out of the result, and 
   await populate(api)
   const withoutCounters = { ...smallBundle(), counters: {} }
   const report0 = await api.backup.importAll(withoutCounters, 'replace')
-  // The populated domain held a day, a task, a media entry and a counter; the
-  // file carries only the day.
-  assert.equal(report0.removed, 3, 'task, media entry and counter all went')
+  // The populated domain held a day, a task, a media entry, a todo and a
+  // counter; the file carries only the day.
+  assert.equal(report0.removed, 4, 'task, media entry, todo and counter all went')
   assert.equal(api.store.view(DATE, DATE).stock.pending, 0, 'and the counter reads as unset')
 })
 

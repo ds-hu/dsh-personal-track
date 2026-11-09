@@ -17,7 +17,7 @@ import { BackupFormatError, type Backup, type ImportMode } from './backup.ts'
 import type { Config, DayBoundary } from './config.ts'
 import { dayKeySpan, isNightTail, type DayKey } from '../shared/habit-day.ts'
 import { CHECK_HABITS, MEAL_SLOTS } from './habits.ts'
-import { mediaRecord, taskRecord } from './domain.ts'
+import { mediaRecord, taskRecord, todoRecord } from './domain.ts'
 import { ApiError } from './api-error.ts'
 import { buildStats } from './stats.ts'
 import {
@@ -104,7 +104,7 @@ export const MAX_MATERIAL_CHARS = 64 * 1024
 
 /** Which registry entry a material or focus request addresses. */
 const ownerTarget = z.object({
-  kind: z.enum(['task', 'media']),
+  kind: z.enum(['task', 'media', 'todo']),
   id: z.string().min(1),
 })
 
@@ -183,13 +183,15 @@ export type StateAnswer = StateView & { readonly ok: true }
 function writeAnswer(
   ctx: RouteCtx,
   date: DayKey,
-  changed?: { readonly kind: 'task' | 'media'; readonly id: string },
+  changed?: { readonly kind: 'task' | 'media' | 'todo'; readonly id: string },
 ): Record<string, unknown> {
   const answer = ctx.stateFor(date)
   if (changed === undefined) return { ...answer }
   const entry = changed.kind === 'task'
     ? answer.tasks.find(candidate => candidate.id === changed.id)
-    : answer.media.find(candidate => candidate.id === changed.id)
+    : changed.kind === 'media'
+      ? answer.media.find(candidate => candidate.id === changed.id)
+      : answer.todos.find(candidate => candidate.id === changed.id)
   return { ...answer, entry }
 }
 
@@ -625,6 +627,44 @@ export const handlers: Record<RouteName, RouteHandler> = {
     const body = ctx.parse(z.object({ id: z.string().min(1), ...VIEWPOINT }), query, 'task delete')
     const date = ctx.dateOf(body, ctx.today())
     const removed = await ctx.store.deleteTask(body.id)
+    return { ...writeAnswer(ctx, date), removed }
+  },
+
+  // --- todos: the left column's list --------------------------------------
+
+  async addTodo(ctx, body) {
+    const date = ctx.dateOf(body, ctx.today())
+    const raw = ctx.parse(z.object({
+      title: z.string().min(1),
+      notes: z.string().optional(),
+      ...VIEWPOINT,
+    }), body, 'todo')
+    const record = todoRecord.parse({
+      ...raw,
+      id: ctx.store.newId(),
+      createdAt: ctx.iso(),
+    })
+    await ctx.store.putTodo(record)
+    return writeAnswer(ctx, date, { kind: 'todo', id: record.id })
+  },
+
+  async patchTodo(ctx, body) {
+    const date = ctx.dateOf(body, ctx.today())
+    const outer = ctx.parse(z.object({ id: z.string().min(1), patch: z.unknown() }), body, 'todo patch')
+    // No progress, no deadline: a todo's whole state is `done`, and its title.
+    const patch = ctx.parse(z.object({
+      title: z.string().min(1).optional(),
+      done: z.boolean().optional(),
+      notes: z.string().nullable().optional(),
+    }), outer.patch, 'todo patch')
+    const entry = await ctx.store.patchTodo(outer.id, patch)
+    return writeAnswer(ctx, date, { kind: 'todo', id: entry.id })
+  },
+
+  async removeTodo(ctx, _body, query) {
+    const body = ctx.parse(z.object({ id: z.string().min(1), ...VIEWPOINT }), query, 'todo delete')
+    const date = ctx.dateOf(body, ctx.today())
+    const removed = await ctx.store.deleteTodo(body.id)
     return { ...writeAnswer(ctx, date), removed }
   },
 

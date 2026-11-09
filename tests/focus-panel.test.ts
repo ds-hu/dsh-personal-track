@@ -80,8 +80,9 @@ function mediaFocusing(id: string, sessions: readonly FocusSession[]): MediaEntr
   }
 }
 
-/** A minimal slice: the two registries, plus a day the entry rules must not touch. */
+/** A minimal slice: the three registries, plus a day the entry rules must not touch. */
 const SLICE: StateView = {
+  todos: [],
   day: {
     date: '2026-09-20',
     isToday: true,

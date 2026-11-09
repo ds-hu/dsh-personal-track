@@ -161,6 +161,7 @@ const reportClock: ClockView = {
   config: { dayStartHour: 4, defaultVocabTarget: { new: 20, review: 60 }, defaultRunMinutes: 30 },
 }
 const reportState: StateView = {
+  todos: [],
   day: {
     date: '2026-09-20', isToday: true,
     day: {

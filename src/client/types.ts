@@ -200,7 +200,7 @@ export interface MaterialImage {
 export type Material = MaterialText | MaterialImage
 
 /** Which registry a material or focus session belongs to. */
-export type RegistryKind = 'task' | 'media'
+export type RegistryKind = 'task' | 'media' | 'todo'
 
 /** One media log entry. */
 export interface MediaEntry {
@@ -258,6 +258,31 @@ export interface TaskEntry {
   readonly overdue: boolean
 }
 
+/**
+ * One todo: the left column's line.
+ *
+ * No progress and no deadline — `done` is the record's own fact, which is why
+ * ticking one cannot move a task's bar and finishing a task ticks nothing off.
+ * It still carries the registry extras (materials, focus sessions), because a
+ * todo is something you can sit down with.
+ */
+export interface TodoEntry {
+  readonly id: string
+  readonly title: string
+  readonly done: boolean
+  /** Fact: when `done` became true; absent while it is false. */
+  readonly completedAt?: string
+  readonly notes?: string
+  readonly createdAt: string
+  readonly materials: readonly Material[]
+  readonly focusSessions: readonly FocusSession[]
+  /** Derived: seconds focused on this todo, closed sessions only. */
+  readonly focusSeconds: number
+}
+
+/** A todo as a backup file carries it: stored facts only. */
+export type TodoRecordWire = Omit<TodoEntry, 'focusSeconds'>
+
 /** A task as a backup file carries it: the stored record, without the states
  *  and derived totals the host computes for the live view. */
 export type TaskRecordWire = Omit<TaskEntry, 'state' | 'overdue' | 'focusSeconds'>
@@ -281,6 +306,8 @@ export interface BackupBundle {
   readonly counters: Readonly<Record<string, Stock>>
   readonly media: readonly MediaRecordWire[]
   readonly tasks: readonly TaskRecordWire[]
+  /** The left column's list; absent in a version 3 file, which had none. */
+  readonly todos?: readonly TodoRecordWire[]
   /** Material image bytes; absent in a version 1 file, which carries none. */
   readonly assets?: readonly AssetBundleEntry[]
 }
@@ -300,6 +327,7 @@ export interface ImportReport {
   readonly days: number
   readonly media: number
   readonly tasks: number
+  readonly todos: number
   readonly counters: number
   readonly assets: number
   /** Records dropped because `replace` cleared keys the file did not carry. */
@@ -315,6 +343,8 @@ export interface StateView {
   readonly stock: Stock
   readonly media: readonly MediaEntry[]
   readonly tasks: readonly TaskEntry[]
+  /** The left column's list, carried with every slice like the other registries. */
+  readonly todos: readonly TodoEntry[]
 }
 
 /** Host facts about the habit day, fetched once per board mount. */

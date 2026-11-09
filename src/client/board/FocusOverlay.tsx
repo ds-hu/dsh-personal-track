@@ -20,7 +20,7 @@
 import { useCallback, useEffect, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
 import { staleHostError, type HabitClient, type MediaPatch, type TaskPatch } from '../api.ts'
 import { useCopy, type Copy } from '../copy/index.tsx'
-import type { Material, MediaEntry, TaskEntry } from '../types.ts'
+import type { Material, MediaEntry, TaskEntry, TodoEntry } from '../types.ts'
 import { dueLevelOf, fractionText, mediaStatusLabel, messageOf, percentOf } from './format.ts'
 import { formatDuration, isEntryView, nowLabel, type FocusTarget, type RegistryEntry } from './focus.ts'
 import { byteSizeText, imageInputOf } from './image-input.ts'
@@ -103,8 +103,10 @@ export function FocusOverlay({ client, target, entry: initial, today, onClose }:
   const latest = useRef<RegistryEntry>(initial)
 
   const isTask = target.kind === 'task'
+  const isTodo = target.kind === 'todo'
   const task = isTask ? entry as TaskEntry : null
-  const media = isTask ? null : entry as MediaEntry
+  const todo = isTodo ? entry as TodoEntry : null
+  const media = !isTask && !isTodo ? entry as MediaEntry : null
 
   const report = useCallback((cause: unknown) => { setError(messageOf(cause, t)) }, [t])
 
@@ -379,7 +381,13 @@ export function FocusOverlay({ client, target, entry: initial, today, onClose }:
   })()
   const cumulative = entry.focusSeconds + elapsed
 
-  const meta = isTask && task !== null
+  const meta = todo !== null
+    ? [
+        <span key="done" className={todo.done ? 'pt-badge pt-badge-ok' : 'pt-badge'}>
+          {todo.done ? t('chip.done') : t('chip.missing')}
+        </span>,
+      ]
+    : isTask && task !== null
     ? [
         task.category === undefined ? null : <span key="category">{task.category}</span>,
         task.due === undefined

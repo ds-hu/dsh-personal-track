@@ -570,20 +570,52 @@ body[data-ds-dark-theme] .pt-track {
 .pt-focus-todo { font-size: 12px; opacity: .75; }
 .pt-focus-todo b { font-variant-numeric: tabular-nums; }
 
-.pt-focus-card {
-  display: flex; flex-direction: column; gap: 6px;
-  padding: 10px 11px; border: 1px solid var(--pt-line); border-radius: 12px;
-  background: var(--pt-surface-2);
+/*
+ * ---- the column's two lists --------------------------------------------
+ *
+ * A todo row is one line and has to stay one: the column is 300px, so the box,
+ * the title and the focus time share it, and the delete glyph only earns its
+ * place on hover. The title is the way into focus mode, which is why it reacts
+ * to a pointer the way every other opening title does.
+ */
+.pt-clock-inline { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pt-todo-add { display: flex; align-items: center; gap: 5px; }
+.pt-todo-input {
+  box-sizing: border-box; flex: 1 1 auto; min-width: 0;
+  border: 1px solid var(--pt-line); border-radius: 8px; background: var(--pt-surface-2);
+  color: inherit; font: inherit; font-size: 12px; padding: 5px 8px; outline: none;
 }
-.pt-focus-card-late { border-color: var(--pt-red-line); background: var(--pt-red-soft); }
-.pt-focus-card-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
-.pt-focus-title {
-  flex: 1; min-width: 0; font-size: 14px; font-weight: 650;
+.pt-todo-input:focus { border-color: var(--pt-info-line); }
+.pt-todo-input::placeholder { opacity: .5; }
+.pt-todo-sec {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; letter-spacing: .06em; opacity: .55;
+}
+.pt-todo-sec::after { content: ''; flex: 1; height: 1px; background: var(--pt-line); }
+.pt-todo-row { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.pt-todo-box {
+  flex: none; appearance: none; width: 15px; height: 15px; padding: 0; cursor: pointer;
+  border: 1px solid var(--pt-line-strong); border-radius: 4px; background: transparent;
+  color: transparent; font: inherit; font-size: 10px; line-height: 1;
+}
+.pt-todo-box-on {
+  border-color: var(--pt-accent-line); background: var(--pt-accent-soft); color: var(--pt-accent);
+}
+.pt-todo-box:disabled { cursor: default; opacity: .5; }
+.pt-todo-title {
+  flex: 1 1 auto; min-width: 0; font-size: 12.5px; cursor: pointer;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.pt-focus-sub { font-size: 11px; opacity: .7; }
-.pt-focus-time { font-size: 12px; font-weight: 600; color: var(--pt-accent); font-variant-numeric: tabular-nums; }
-.pt-focus-actions { display: flex; gap: 6px; margin-top: 2px; }
+.pt-todo-title:hover { color: var(--pt-accent); }
+.pt-todo-title-done { opacity: .45; text-decoration: line-through; }
+.pt-todo-meta { flex: none; font-size: 11px; opacity: .55; font-variant-numeric: tabular-nums; }
+.pt-todo-mark { flex: none; font-size: 11px; opacity: .4; }
+.pt-todo-drop {
+  flex: none; appearance: none; border: 0; background: transparent; color: inherit;
+  opacity: .35; cursor: pointer; font: inherit; font-size: 13px; line-height: 1; padding: 0 1px;
+}
+.pt-todo-drop:hover:not(:disabled) { opacity: 1; color: var(--pt-red); }
+.pt-todo-drop:disabled { cursor: default; opacity: .2; }
 
 /* A title that opens focus mode reads as one. */
 .pt-row-open { cursor: pointer; }
