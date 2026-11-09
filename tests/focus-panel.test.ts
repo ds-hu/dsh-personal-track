@@ -21,9 +21,9 @@
  */
 import { strict as assert } from 'node:assert'
 import { focusSeconds } from '../src/shared/focus-session.ts'
-import { byRecentFocus, lastFocusAt, withEntry } from '../src/client/board/focus.ts'
+import { byRecentFocus, focusedListOf, lastFocusAt, withEntry } from '../src/client/board/focus.ts'
 import { createWriteQueue } from '../src/client/board/write-queue.ts'
-import type { FocusSession, MediaEntry, StateView, TaskEntry } from '../src/client/types.ts'
+import type { FocusSession, MediaEntry, StateView, TaskEntry, TodoEntry } from '../src/client/types.ts'
 
 let passed = 0
 
@@ -76,6 +76,19 @@ function taskFocusing(id: string, state: TaskEntry['state'], sessions: readonly 
 function mediaFocusing(id: string, sessions: readonly FocusSession[]): MediaEntry {
   return {
     ...mediaOf({ id, kind: 'film', title: id, status: 'active', createdAt: '2026-09-10T10:00:00' }),
+    focusSessions: sessions,
+    focusSeconds: focusSeconds(sessions),
+  }
+}
+
+/** A todo entry carrying these focus sessions, with the total the host derives. */
+function todoFocusing(id: string, sessions: readonly FocusSession[]): TodoEntry {
+  return {
+    id,
+    title: id,
+    done: false,
+    createdAt: '2026-09-18T10:00:00',
+    materials: [],
     focusSessions: sessions,
     focusSeconds: focusSeconds(sessions),
   }
@@ -236,7 +249,23 @@ await check('an entry the slice does not hold leaves it exactly as it was', () =
   assert.equal(withEntry(SLICE, stranger), SLICE, 'the same slice back, not an empty rebuild')
 })
 
-console.log('what the column’s "focused on" list is ordered by')
+console.log('the column’s "focused on" list')
+
+await check('a focused todo stays in the list above, never repeated in the derived one', () => {
+  const todo = todoFocusing('d1', [closed('a', '2026-09-20T11:00:00.000Z', '2026-09-20T11:20:00.000Z')])
+  const task = taskFocusing('t1', 'doing', [closed('b', '2026-09-20T09:00:00.000Z', '2026-09-20T09:30:00.000Z')])
+  assert.deepEqual(
+    focusedListOf([todo, task]).map(entry => entry.id),
+    ['t1'],
+    'a todo is already a row in 待办, so copying it here would draw the same line twice',
+  )
+})
+
+await check('a row with no time spent is not a record of anything', () => {
+  const idle = taskFocusing('t1', 'todo', [])
+  const openOnly = mediaFocusing('m1', [{ id: 'open', startedAt: '2026-09-20T12:00:00.000Z' }])
+  assert.deepEqual(focusedListOf([idle, openOnly]), [], 'nothing closed, so nothing to list')
+})
 
 await check('most recently worked on first, across both registries', () => {
   const task = taskFocusing('t1', 'doing', [closed('a', '2026-09-20T09:00:00.000Z', '2026-09-20T09:30:00.000Z')])
@@ -244,9 +273,8 @@ await check('most recently worked on first, across both registries', () => {
     closed('b', '2026-09-20T11:00:00.000Z', '2026-09-20T11:20:00.000Z'),
     { id: 'open', startedAt: '2026-09-20T12:00:00.000Z' },
   ])
-  const ordered = [task, media].sort(byRecentFocus)
   assert.deepEqual(
-    ordered.map(entry => entry.id),
+    focusedListOf([task, media]).map(entry => entry.id),
     ['m1', 't1'],
     'the newer session leads, whichever registry it sits in',
   )
@@ -262,7 +290,7 @@ await check('total time does not decide the order', () => {
     closed('b', '2026-09-20T11:55:00.000Z', '2026-09-20T12:05:00.000Z'),
   ])
   assert.ok(justNow.focusSeconds < longAgo.focusSeconds, 'the fixtures really are the wrong way round by time')
-  assert.deepEqual([longAgo, justNow].sort(byRecentFocus).map(entry => entry.id), ['m1', 't1'])
+  assert.deepEqual(focusedListOf([longAgo, justNow]).map(entry => entry.id), ['m1', 't1'])
 })
 
 await check('an open session orders nothing, and ties keep the order they came in', () => {

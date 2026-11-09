@@ -115,6 +115,15 @@ export interface HabitClient {
   patchTodo(id: string, patch: TodoPatch, viewpoint?: Viewpoint): Promise<EntryAnswer>
   removeTodo(id: string, viewpoint?: Viewpoint): Promise<RemovedAnswer>
   /**
+   * Write one registry entry's own note, whichever registry it lives in.
+   *
+   * The three registries answer on three paths, and a caller that picked one by
+   * "is this a task, or is it not" sent a todo's note to the media table — a 404
+   * that the write queue then swallowed. One method, one switch, one place to be
+   * wrong about it.
+   */
+  patchNotes(kind: RegistryKind, id: string, notes: string, viewpoint?: Viewpoint): Promise<EntryAnswer>
+  /**
    * Where an `<img src>` points for one stored image.
    *
    * The one client method that is not a request: image bytes never travel in a
@@ -377,7 +386,11 @@ export function createHabitClient(options: HabitClientOptions = {}): HabitClient
     },
     state: async date => {
       const value = await request<StateView>(url('state', { date }))
+      // Both registries *and* the column's list: a host half from before the
+      // todos existed answers without `todos`, and a caller spreading it would
+      // throw during render instead of saying what to do about it.
       if (value.day === undefined || typeof value.day.date !== 'string') staleHost()
+      if (!Array.isArray(value.tasks) || !Array.isArray(value.media) || !Array.isArray(value.todos)) staleHost()
       return value
     },
     check: (date, habit) => request<StateView>(url('check'), body('check', { date, habit })),
@@ -442,6 +455,18 @@ export function createHabitClient(options: HabitClientOptions = {}): HabitClient
       request<EntryAnswer>(url('addTodo'), body('addTodo', withDay(viewpoint, input))),
     patchTodo: (id, patch, viewpoint) =>
       request<EntryAnswer>(url('patchTodo'), body('patchTodo', withDay(viewpoint, { id, patch }))),
+    patchNotes: (kind, id, notes, viewpoint) => {
+      // One path per registry; the payload is the same shape on all three, which
+      // is exactly why picking the path from a boolean was the bug.
+      switch (kind) {
+        case 'task':
+          return request<EntryAnswer>(url('patchTask'), body('patchTask', withDay(viewpoint, { id, patch: { notes } })))
+        case 'todo':
+          return request<EntryAnswer>(url('patchTodo'), body('patchTodo', withDay(viewpoint, { id, patch: { notes } })))
+        case 'media':
+          return request<EntryAnswer>(url('patchMedia'), body('patchMedia', withDay(viewpoint, { id, patch: { notes } })))
+      }
+    },
     removeTodo: (id, viewpoint) => request<RemovedAnswer>(
       url('removeTodo', { id, ...dayQuery(viewpoint) }),
       { method: routes.removeTodo.method },

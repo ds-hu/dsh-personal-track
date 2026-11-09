@@ -103,6 +103,35 @@ check('every route in the table is exercised by this test', () => {
   assert.deepEqual(covered, declared, 'a new route must be asserted here, not merely added to the table')
 })
 
+await checkAsync('one note writer, three paths: each registry writes its own note', async () => {
+  // The bug this replaces: the overlay picked the path from "is this a task",
+  // so a todo's note went to `/media` and came back 404 — swallowed by the write
+  // queue, leaving the save indicator stuck. One method, three paths, asserted.
+  for (const [kind, path] of [
+    ['task', '/habit/api/tasks'],
+    ['media', '/habit/api/media'],
+    ['todo', '/habit/api/todos'],
+  ] as const) {
+    const { client, calls } = recording()
+    await client.patchNotes(kind, 'x1', '记一笔')
+    assert.equal(calls[0]?.method, 'PATCH', `${kind}: a note is a patch`)
+    assert.ok(calls[0]?.url.endsWith(path), `${kind}: expected ${path}, got ${calls[0]?.url}`)
+    assert.deepEqual(calls[0]?.body, { id: 'x1', patch: { notes: '记一笔' } })
+  }
+})
+
+await checkAsync('a state slice with no todos is a stale host, not a crash', async () => {
+  // A host half from before the todos existed answers this shape. The panel
+  // spreads `todos`, so an unguarded answer dies mid-render (a TypeError, not a
+  // message) — which is exactly what `staleHostError` exists to prevent.
+  const { client } = recording({ ok: true, day: { date: '2026-09-16' }, tasks: [], media: [] })
+  await assert.rejects(
+    () => client.state('2026-09-16'),
+    (cause: unknown) => (cause as { code?: string }).code === 'habit/stale-host',
+    'a slice without the column’s list names the stale host half',
+  )
+})
+
 /**
  * A payload the client accepts, per route.
  *
@@ -112,7 +141,7 @@ check('every route in the table is exercised by this test', () => {
  */
 const PAYLOADS: Partial<Record<RouteName, unknown>> = {
   clock: { today: '2026-09-16', nightTail: false, now: 'x', config: {} },
-  state: { ok: true, day: { date: '2026-09-16' } },
+  state: { ok: true, day: { date: '2026-09-16' }, tasks: [], media: [], todos: [] },
   exportBackup: { ok: true, backup: { format: 'x' } },
   sweepAssets: { ok: true, removed: 0 },
   focusStart: { ok: true, sessionId: 's1', entry: { id: 't1' } },

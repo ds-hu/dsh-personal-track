@@ -22,7 +22,7 @@ import { BoardBody } from './BoardBody.tsx'
 import { FocusColumn } from './FocusColumn.tsx'
 import { FocusOverlay } from './FocusOverlay.tsx'
 import {
-  byRecentFocus,
+  focusedListOf,
   kindOf,
   targetOf,
   withEntry,
@@ -96,23 +96,22 @@ function Panel({ client }: { readonly client: HabitClient }): JSX.Element {
   }, [refresh])
 
   const entries: readonly RegistryEntry[] = useMemo(
-    () => (snapshot === null ? [] : [...snapshot.tasks, ...snapshot.media, ...snapshot.todos]),
+    () => (snapshot === null
+      ? []
+      // Spread with a fallback per list: a host half from before the todos
+      // existed answers without it, and `[...undefined]` throws mid-render.
+      // `api.state` already names that host; this keeps the frame that is
+      // already drawn from dying while the message arrives.
+      : [
+          ...(snapshot.tasks ?? []),
+          ...(snapshot.media ?? []),
+          ...(snapshot.todos ?? []),
+        ]),
     [snapshot],
   )
 
-  /**
-   * The column's derived half: everything that already carries focus time.
-   *
-   * Derived from the entries the panel holds, so a task focused on from the board
-   * appears here without being copied into a todo — and the row can never
-   * disagree with the entry they both come from. **Most recent first**: this
-   * half of the column is a record of what you were just doing, and the totals
-   * are printed on the rows rather than used to rank them.
-   */
-  const focusedEntries = useMemo(
-    () => entries.filter(entry => entry.focusSeconds > 0).sort(byRecentFocus),
-    [entries],
-  )
+  /** The column's derived half — see `focusedListOf` for why never a todo. */
+  const focusedEntries = useMemo(() => focusedListOf(entries), [entries])
 
   const entryFor = useCallback(
     (target: FocusTarget | null): RegistryEntry | undefined =>
@@ -170,6 +169,11 @@ function Panel({ client }: { readonly client: HabitClient }): JSX.Element {
     setTodoBusy(true)
     try {
       const next = await action()
+      // This answer is newer than any read still in flight, so it retires them —
+      // the same line `BoardBody.act` draws, and for the same reason: without it
+      // a `refresh()` issued before the write lands afterwards and puts the row
+      // back the way it was, so a tick visibly reverts.
+      reads.current += 1
       setSnapshot(next)
       setError(null)
     } catch (cause) {

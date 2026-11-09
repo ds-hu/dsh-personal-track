@@ -48,6 +48,26 @@ export interface MaterialSection {
   readonly ops: readonly MaterialOp[]
 }
 
+/**
+ * Whether a drag carries files, whichever shape the browser exposes `types` in.
+ *
+ * A modern browser hands over a frozen array; the older `DOMStringList` has
+ * `contains` and index access but no `includes`. `dragover` throwing its way out
+ * of React is not a failure a drop target can afford, so both shapes are read.
+ */
+function carriesFiles(data: DataTransfer): boolean {
+  const types = data.types as unknown as {
+    readonly length: number
+    includes?: (value: string) => boolean
+    readonly [index: number]: string
+  }
+  if (typeof types.includes === 'function') return types.includes('Files')
+  for (let index = 0; index < types.length; index += 1) {
+    if (types[index] === 'Files') return true
+  }
+  return false
+}
+
 /** The image files a clipboard or a drop carried. */
 function filesOf(data: DataTransfer | null): readonly File[] {
   if (data === null) return []
@@ -134,7 +154,7 @@ export function useMaterialSection(options: {
   const onDragOver = useCallback((event: ReactDragEvent<HTMLElement>): void => {
     // Only a file drag is ours; dragging text across the form stays the
     // browser's business.
-    if (!event.dataTransfer.types.includes('Files')) return
+    if (!carriesFiles(event.dataTransfer)) return
     event.preventDefault()
   }, [])
 

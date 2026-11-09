@@ -279,8 +279,8 @@ export function buildStats(
         })
       }
     }
-    // One record a day in the new shape, but a legacy day may still hold the
-    // sets it was written with: merge first, so both shapes read identically.
+    // A day holds one set per record, and a legacy day holds the preset sets it
+    // was written with: sum either shape the same way.
     const rope = mergeRope(day.rope)
     if (rope !== null) {
       ropeDays += 1

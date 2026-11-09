@@ -36,14 +36,15 @@ const vocabSession = z.object({
 })
 
 /**
- * One jump-rope record.
+ * One jump-rope set — a day holds as many as you jumped.
  *
- * New writes store one record a day with a free `count` (`seconds` is the time
+ * New writes store one set per record with a free `count` (`seconds` is the time
  * it took, `avgHr` what a watch measured). `preset` is the legacy shape — a
- * fixed-count set of 90 or 180 jumps, several sets a day — and it stays in the
- * schema so documents and backups written before the free count still parse;
- * `src/shared/rope.ts` folds those sets into one record on read. A record must
- * carry one of the two, so neither can disappear into a shapeless row.
+ * fixed-count set of 90 or 180 jumps — and it stays in the schema so documents
+ * and backups written before the free count still parse.
+ * `src/shared/rope.ts` sums a day's sets into the totals the card, the report and
+ * the statistics read. A record must carry one of the two counts, so neither can
+ * disappear into a shapeless row.
  *
  * The domain version deliberately stays 2: this is an optional-field change,
  * and `per-record` backends *discard* documents stamped with a version they do
@@ -62,7 +63,7 @@ const ropeSession = z.object({
   message: 'a rope record needs a count',
 })
 
-/** Repetitive sessions (jump rope); one record a day after the free count. */
+/** Repetitive sessions (jump rope); one set per record, any number a day. */
 const ropeSessions = z.array(ropeSession).default([])
 
 /** Everything one habit day holds. Fields are optional/defaulted so older

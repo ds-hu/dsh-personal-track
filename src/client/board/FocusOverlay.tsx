@@ -18,7 +18,7 @@
  *   the mode works either way.
  */
 import { useCallback, useEffect, useRef, useState, type JSX, type PointerEvent as ReactPointerEvent } from 'react'
-import { staleHostError, type HabitClient, type MediaPatch, type TaskPatch } from '../api.ts'
+import { staleHostError, type HabitClient, type TaskPatch } from '../api.ts'
 import { useCopy, type Copy } from '../copy/index.tsx'
 import type { Material, MediaEntry, TaskEntry, TodoEntry } from '../types.ts'
 import { dueLevelOf, fractionText, mediaStatusLabel, messageOf, percentOf } from './format.ts'
@@ -167,11 +167,14 @@ export function FocusOverlay({ client, target, entry: initial, today, onClose }:
   }, [adopt, report])
 
   /** The notes write for whichever registry this is. */
-  const writeNotes = useCallback((text: string): Promise<{ readonly entry?: RegistryEntry }> => (
-    isTask
-      ? client.patchTask(entry.id, { notes: text } as TaskPatch)
-      : client.patchMedia(entry.id, { notes: text } as MediaPatch)
-  ), [client, entry.id, isTask])
+  const writeNotes = useCallback(
+    (text: string): Promise<{ readonly entry?: RegistryEntry }> =>
+      // The registry, not "is this a task": a todo's note sent to the media
+      // table is a 404 the write queue swallows, which is how "保存中…" got
+      // stuck on a todo forever.
+      client.patchNotes(target.kind, entry.id, text),
+    [client, entry.id, target.kind],
+  )
 
   // --- the session, the clock, and the way out ---------------------------
 

@@ -560,8 +560,6 @@ body[data-ds-dark-theme] .pt-track {
 @media (max-width: 720px) {
   .pt-focus-col { display: none; }
 }
-.pt-focus-label { font-size: 11px; letter-spacing: .07em; opacity: .55; }
-.pt-focus-clock { font-size: 34px; font-weight: 250; line-height: 1.05; font-variant-numeric: tabular-nums; }
 .pt-focus-date { font-size: 12px; opacity: .7; display: flex; align-items: center; gap: 6px; }
 .pt-night-badge {
   border: 1px solid var(--pt-info-line); background: var(--pt-info-soft);
@@ -602,9 +600,17 @@ body[data-ds-dark-theme] .pt-track {
   border-color: var(--pt-accent-line); background: var(--pt-accent-soft); color: var(--pt-accent);
 }
 .pt-todo-box:disabled { cursor: default; opacity: .5; }
+/*
+ * The title is a real button — it opens focus mode, so it has to be reachable by
+ * keyboard, and a clickable span is not. The button chrome is reset here rather
+ * than the gesture moved somewhere a keyboard already reaches, because the title
+ * is the target the pointer has always used.
+ */
 .pt-todo-title {
   flex: 1 1 auto; min-width: 0; font-size: 12.5px; cursor: pointer;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  appearance: none; border: 0; margin: 0; padding: 0;
+  background: transparent; color: inherit; font-family: inherit; text-align: left;
 }
 .pt-todo-title:hover { color: var(--pt-accent); }
 .pt-todo-title-done { opacity: .45; text-decoration: line-through; }

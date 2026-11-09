@@ -66,11 +66,12 @@ function TodoRow({ todo, busy, onToggle, onRemove, onFocus }: {
         disabled={busy}
         onClick={onToggle}
       >{todo.done ? '✓' : ''}</button>
-      <span
+      <button
+        type="button"
         className={todo.done ? 'pt-todo-title pt-todo-title-done' : 'pt-todo-title'}
         title={t('tile.focus')}
         onClick={onFocus}
-      >{todo.title}</span>
+      >{todo.title}</button>
       {todo.focusSeconds <= 0
         ? null
         : <span className="pt-todo-meta">{t('todo.focus', { duration: formatDuration(todo.focusSeconds) })}</span>}
@@ -94,9 +95,12 @@ function FocusedRow({ entry, onFocus }: {
   return (
     <div className="pt-todo-row">
       <span className="pt-todo-mark">⤢</span>
-      <span className="pt-todo-title" title={'state' in entry && entry.overdue ? t('focus.overdueTasks') : entry.title} onClick={onFocus}>
-        {entry.title}
-      </span>
+      <button
+        type="button"
+        className="pt-todo-title"
+        title={t('tile.focus')}
+        onClick={onFocus}
+      >{entry.title}</button>
       <span className="pt-todo-meta">{t('todo.focus', { duration: formatDuration(entry.focusSeconds) })}</span>
     </div>
   )

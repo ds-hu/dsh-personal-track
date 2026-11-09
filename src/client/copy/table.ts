@@ -350,16 +350,11 @@ export const COPY = {
   'stats.meals.breakfastValue': { zh: '{days} 天（{percent}%）', en: '{days} days ({percent}%)' },
 
   // ---- the focus column ------------------------------------------------
-  'focus.recent': { zh: '专注栏 · 最近专注', en: 'Focus · latest session' },
-  'focus.column': { zh: '专注栏', en: 'Focus' },
   'focus.progress': { zh: '进度 {current}/{total}', en: '{current}/{total} done' },
   'focus.due.today': { zh: '截止于今天', en: 'due today' },
   'focus.due': { zh: '截止于{date}', en: 'due {date}' },
   'focus.kind.film': { zh: '影', en: 'Film' },
   'focus.kind.book': { zh: '书', en: 'Book' },
-  'focus.last': { zh: '最近一段 {stamp} · {duration}', en: 'Last: {stamp} · {duration}' },
-  'focus.total': { zh: '累计专注 {duration}', en: '{duration} focused in total' },
-  'focus.continue': { zh: '继续专注', en: 'Continue focusing' },
   'habitDay': { zh: '习惯日 {date}', en: 'Habit day {date}' },
   'focus.night': { zh: '夜', en: 'night' },
   'focus.openTasks': { zh: '剩余任务', en: 'open' },

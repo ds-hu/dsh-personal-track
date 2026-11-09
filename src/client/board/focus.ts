@@ -9,8 +9,9 @@
  * What is *not* here any more is the pinned item. The column used to remember
  * one browser-local reference, with no instant attached — it answered "which
  * entry did this browser open last", not "what did I focus on last". That is a
- * derived fact now (`recentFocus` in `src/shared/focus-session.ts`), so the only
- * focus state left in the panel is the in-memory target of an open overlay.
+ * derived fact now ({@link focusedListOf}, off the sessions every entry already
+ * carries), so the only focus state left in the panel is the in-memory target of
+ * an open overlay.
  */
 import type { Copy } from '../copy/index.tsx'
 import { latestClosed, type Session } from '../../shared/focus-session.ts'
@@ -134,6 +135,25 @@ export function byRecentFocus(
   const right = lastFocusAt(b)
   if (left === right) return 0
   return right - left
+}
+
+/**
+ * The column's derived half: what you have focused on, newest first — and never
+ * a todo.
+ *
+ * A todo is already in the list above this one, so including it here would draw
+ * the same line twice the moment anyone focused on it. The derived half exists
+ * for the entries that are *not* copied into a todo — a task, a film — and an
+ * entry with no time spent is not a record of anything, so it is left out as
+ * well.
+ *
+ * @param entries - every registry entry the panel holds.
+ * @returns the derived rows, most recently worked on first.
+ */
+export function focusedListOf(entries: readonly RegistryEntry[]): readonly RegistryEntry[] {
+  return entries
+    .filter(entry => entry.focusSeconds > 0 && kindOf(entry) !== 'todo')
+    .sort(byRecentFocus)
 }
 
 /**
