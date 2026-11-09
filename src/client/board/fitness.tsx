@@ -1,13 +1,14 @@
 /**
  * The training tiles: running (single-valued, with derived pace), jump rope
- * (single-valued, with a free count and derived tempo), pull-ups (support
+ * (a list of sets, with the day's totals and derived tempo), pull-ups (support
  * time), plank (hold time), gym equipment, and free-form sessions (a duration,
  * plus optional energy).
  */
-import { useState, type JSX } from 'react'
+import { useReducer, useState, type JSX } from 'react'
 import type { EquipmentSession, FreeSession, PlankSession, PullupSession } from '../types.ts'
 import { useCopy, type Copy } from '../copy/index.tsx'
-import { ropeDurationOf, ropeTempo, type RopeDay } from '../../shared/rope.ts'
+import { mergeRope, ropeCount, ropeDurationOf, ropeTempo, type RopeSet } from '../../shared/rope.ts'
+import { IDLE, editor, isAdding, isEditing, type EditorAction, type EditorState } from './editor-state.ts'
 import { FieldForm, type FieldSpec } from './fields.tsx'
 import { durationText, fractionText, paceLabel, paceOf, timeField, timeOf, timeValueOf } from './format.ts'
 import { SessionTile, type SessionEntry } from './session-cards.tsx'
@@ -167,80 +168,100 @@ export interface SessionHandlers {
 }
 
 /** Props for the jump-rope tile. */
-export interface RopeTileProps {
-  /** The day's record, with any legacy sets already merged (see shared/rope.ts). */
-  readonly rope: RopeDay | null
-  readonly busy: boolean
-  readonly onSet: (payload: Record<string, unknown>) => void
-  readonly onClear: () => void
+export interface RopeTileProps extends SessionHandlers {
+  /** The day's sets, in the order they were recorded. */
+  readonly sessions: readonly RopeSet[]
 }
 
 /**
- * Jump rope: one record a day, like a run. The count is free — the old 90/180
- * preset pair is gone — and the tile derives tempo from count and time, which
- * is the pace-like figure that makes two different sessions comparable.
+ * Jump rope: a day is a list of sets.
+ *
+ * The head carries the day's totals — sets, jumps, time, the time-weighted heart
+ * rate and the tempo they imply — because the totals are what the day is about;
+ * each set is a row that can be retimed, recounted or deleted like any other
+ * session, and ＋ appends one. The count is free: the old 90/180 preset pair is
+ * gone, so a set is an ordinary number of jumps.
  */
-export function RopeTile({ rope, busy, onSet, onClear }: RopeTileProps): JSX.Element {
+export function RopeTile({ sessions, busy, onAdd, onPatch, onRemove }: RopeTileProps): JSX.Element {
   const t = useCopy()
-  const [editing, setEditing] = useState(false)
-  const tempo = rope === null ? undefined : ropeTempo(rope.count, rope.seconds)
+  const [mode, dispatch] = useReducer(
+    (state: EditorState, action: EditorAction) => editor(state, action, sessions.map(session => session.id)),
+    IDLE,
+  )
+  const totals = mergeRope(sessions)
+  const fields: readonly FieldSpec[] = [timeField(t), ...ropeFields(t)]
+  const tempo = totals === null ? undefined : ropeTempo(totals.count, totals.seconds)
+  const meta = totals === null
+    ? t('fitness.notRecorded')
+    : [
+        t('fitness.rope.meta', {
+          sets: totals.sets,
+          count: totals.count,
+          duration: durationText(ropeDurationOf(totals.seconds), t),
+        }),
+        ...(totals.avgHr === undefined ? [] : [`♥${totals.avgHr}`]),
+        ...(tempo === undefined ? [] : [t('unit.tempo', { tempo: fractionText(tempo) })]),
+      ].join(' · ')
 
   return (
-    <Tile span={2} tone={rope === null ? 'idle' : 'done'}>
-      <TileHead
-        title={t('fitness.rope.title')}
-        meta={rope === null
-          ? t('fitness.notRecorded')
-          : t('fitness.rope.meta', {
-              count: rope.count,
-              duration: durationText(ropeDurationOf(rope.seconds), t),
-            })}
-      >
-        {rope === null ? null : (
-          <>
-            <IconButton label={t('tile.edit')} disabled={busy} onClick={() => setEditing(true)}>✎</IconButton>
-            <IconButton label={t('tile.remove')} disabled={busy} onClick={onClear}>×</IconButton>
-          </>
-        )}
+    <Tile span={2} tone={totals === null ? 'idle' : 'done'}>
+      <TileHead title={t('fitness.rope.title')} meta={meta}>
+        <IconButton label={t('tile.add')} disabled={busy} onClick={() => dispatch({ kind: 'open-add' })}>＋</IconButton>
       </TileHead>
 
-      {editing ? (
-        <FieldForm
-          fields={[timeField(t), ...ropeFields(t)]}
-          // Same rule as a new run: nothing to edit means the fields' own
-          // defaults (the clock) apply, rather than an empty `initial.time`
-          // winning over them and opening the form blank.
-          {...(rope === null
-            ? {}
-            : {
-                initial: {
-                  time: timeValueOf(rope.at),
-                  count: rope.count,
-                  seconds: rope.seconds,
-                  avgHr: rope.avgHr,
-                },
+      {isAdding(mode)
+        ? (
+          <FieldForm
+            fields={fields}
+            submitLabel={t('tile.add')}
+            busy={busy}
+            onSubmit={(payload) => {
+              onAdd(payload)
+              dispatch({ kind: 'close' })
+            }}
+            onCancel={() => dispatch({ kind: 'close' })}
+          />
+        )
+        : null}
+
+      {sessions.map(session => (isEditing(mode, session.id)
+        ? (
+          <FieldForm
+            key={session.id}
+            fields={fields}
+            initial={{
+              time: timeValueOf(session.at),
+              count: ropeCount(session),
+              seconds: session.seconds,
+              avgHr: session.avgHr,
+            }}
+            submitLabel={t('form.save')}
+            busy={busy}
+            onSubmit={(payload) => {
+              onPatch(session.id, payload)
+              dispatch({ kind: 'close' })
+            }}
+            onCancel={() => dispatch({ kind: 'close' })}
+          />
+        )
+        : (
+          <div className="pt-list-row" key={session.id}>
+            <span className="pt-list-text">
+              {t('fitness.rope.set', {
+                time: timeOf(session.at),
+                count: ropeCount(session),
+                duration: durationText(ropeDurationOf(session.seconds), t),
               })}
-          submitLabel={t('form.save')}
-          busy={busy}
-          onSubmit={(payload) => {
-            onSet(payload)
-            setEditing(false)
-          }}
-          onCancel={() => setEditing(false)}
-        />
-      ) : rope === null ? (
-        <div className="pt-tile-foot">
-          <span className="pt-muted">{t('fitness.rope.hint')}</span>
-          <span className="pt-grow" />
-          <button type="button" className="pt-primary" disabled={busy} onClick={() => setEditing(true)}>{t('fitness.record')}</button>
-        </div>
-      ) : (
-        <div className="pt-metrics">
-          {tempo === undefined ? null : <span>{t('unit.tempo', { tempo: fractionText(tempo) })}</span>}
-          {rope.avgHr === undefined ? null : <span>♥ {rope.avgHr}</span>}
-          <span className="pt-muted">{timeOf(rope.at)}</span>
-        </div>
-      )}
+              {session.avgHr === undefined ? '' : ` · ♥${session.avgHr}`}
+            </span>
+            <IconButton label={t('tile.edit')} disabled={busy} onClick={() => dispatch({ kind: 'edit', id: session.id })}>✎</IconButton>
+            <IconButton label={t('tile.remove')} disabled={busy} onClick={() => onRemove(session.id)}>×</IconButton>
+          </div>
+        )))}
+
+      {totals === null && mode.kind === 'idle'
+        ? <span className="pt-muted">{t('fitness.rope.hint')}</span>
+        : null}
     </Tile>
   )
 }

@@ -38,7 +38,6 @@ import {
   type VocabProgress,
 } from './derive.ts'
 import { focusSeconds, withClosedSession, withOpenedSession } from '../shared/focus-session.ts'
-import { mergeRope } from '../shared/rope.ts'
 import type { DayKey } from '../shared/habit-day.ts'
 
 /** The laundry stock's key inside the counters table. */
@@ -47,9 +46,10 @@ export const LAUNDRY_KEY = 'laundry'
 /**
  * Session-bearing habits.
  *
- * Running is single-valued and has routes of its own. Jump rope is single-valued
- * too, but it keeps the session routes: its record is the same shape and the
- * store is where "one a day" is enforced, so a client cannot write two.
+ * Running is single-valued and has routes of its own. Every other kind, jump
+ * rope included, is a list: a write appends one entry, a patch addresses one by
+ * id, and a delete removes one — `sessionsOf` is the only place that knows which
+ * array of the day a kind lives in.
  */
 export type SessionKind = 'vocab' | 'duolingo' | 'rope' | 'pullup' | 'plank' | 'equipment' | 'free' | 'washing'
 
@@ -609,37 +609,26 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
 
     addSession(key, kind, entry) {
       const id = randomUUID()
-      return store.mutateDay(key, (day) => {
-        // 跳绳 is one record a day, like a run: a write replaces the day's
-        // record instead of appending, so a legacy document's sets collapse
-        // into the one the board shows the moment it is edited.
-        if (kind === 'rope') return withSessions(day, kind, key, [{ ...entry, id }])
-        return withSessions(day, kind, key, [...sessionsOf(day, kind), { ...entry, id }])
-      })
+      // Every session kind appends, jump rope included: a day is a list of
+      // sets, and replacing the day's record on each write is what made a
+      // second set impossible to record.
+      return store.mutateDay(key, day => withSessions(day, kind, key, [...sessionsOf(day, kind), { ...entry, id }]))
     },
 
     patchSession(key, kind, id, patch) {
       return store.mutateDay(key, (day) => {
-        if (kind === 'rope') {
-          const merged = mergeRope(day.rope)
-          // Nothing recorded: a patch has no record to land on, and inventing
-          // one from a partial payload would store a fact nobody wrote.
-          if (merged === null) return withSessions(day, kind, key, [])
-          return withSessions(day, kind, key, [{ ...merged, ...patch, id: merged.id }])
-        }
+        const sessions = sessionsOf(day, kind)
+        // A patch addresses a record that must exist: landing one on a day with
+        // nothing recorded would invent a fact nobody wrote.
+        if (!sessions.some(session => session.id === id)) return withSessions(day, kind, key, [...sessions])
         return withSessions(day, kind, key,
-          sessionsOf(day, kind).map(session => (session.id === id ? { ...session, ...patch, id } : session)))
+          sessions.map(session => (session.id === id ? { ...session, ...patch, id } : session)))
       })
     },
 
     removeSession(key, kind, id) {
-      return store.mutateDay(key, (day) => {
-        // One record a day: deleting the row deletes the day's rope, including
-        // whatever legacy sets had been merged into the view.
-        if (kind === 'rope') return withSessions(day, kind, key, [])
-        return withSessions(day, kind, key,
-          sessionsOf(day, kind).filter(session => session.id !== id))
-      })
+      return store.mutateDay(key, day => withSessions(day, kind, key,
+        sessionsOf(day, kind).filter(session => session.id !== id)))
     },
 
     async wash(key, pieces, at) {

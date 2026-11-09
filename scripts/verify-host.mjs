@@ -207,13 +207,20 @@ const rope = await api.call('POST', '/session', {
 assert.equal(rope.status, 200)
 assert.equal(rope.body.day.day.rope.length, 1)
 assert.equal(rope.body.day.day.rope[0].count, 120, 'the count is a number, not a string')
-// One record a day, like a run: the second write replaces the first instead of
-// appending a set, and the day's figure is the one the board will edit.
+// A day is a list of sets: the second write joins the first instead of
+// replacing it, and either set can be deleted on its own.
 const ropeAgain = await api.call('POST', '/session', {
   date: DATE, kind: 'rope', entry: { count: 300, seconds: 120, avgHr: 140 },
 })
-assert.equal(ropeAgain.body.day.day.rope.length, 1, 'a day holds one rope record')
-assert.equal(ropeAgain.body.day.day.rope[0].count, 300)
+assert.equal(ropeAgain.body.day.day.rope.length, 2, 'a day holds every set that was recorded')
+assert.equal(ropeAgain.body.day.day.rope[0].count, 120, 'the first set is untouched')
+assert.equal(ropeAgain.body.day.day.rope[1].count, 300)
+const ropeGone = await api.call(
+  'DELETE',
+  `/session?date=${DATE}&kind=rope&id=${ropeAgain.body.day.day.rope[0].id}`,
+)
+assert.equal(ropeGone.body.day.day.rope.length, 1, 'one set can go on its own')
+assert.equal(ropeGone.body.day.day.rope[0].count, 300, 'and the other one stays')
 
 const pullup = await api.call('POST', '/session', { date: DATE, kind: 'pullup', entry: { seconds: 32 } })
 assert.equal(pullup.body.day.day.pullup[0].seconds, 32)
@@ -237,7 +244,7 @@ assert.equal(
 const badKind = await api.call('POST', '/session', { date: DATE, kind: 'swimming', entry: {} })
 assert.equal(badKind.status, 400, 'an unknown session kind is refused')
 assert.equal(badKind.body.error.code, 'habit/bad-request')
-console.log('training sessions ✓  (rope keeps one free-count record a day, unknown kinds refused)')
+console.log('training sessions ✓  (rope keeps every set of the day, unknown kinds refused)')
 
 const changedRun = await api.call('PUT', '/run', { date: DATE, minutes: 25, distanceKm: 5 })
 assert.equal(changedRun.body.day.day.run.minutes, 25, 'an explicit duration wins over the default')

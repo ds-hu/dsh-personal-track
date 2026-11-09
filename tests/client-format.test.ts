@@ -243,7 +243,7 @@ check('each group is one line, with the details it used to drop', () => {
   assert.ok(reportText.includes('三餐 早 ¥12 · 午 ¥24.5 · 晚 —（共 ¥36.5）'), 'every slot is named, missing one included')
   assert.ok(reportText.includes('背单词 55%（新 5/20 · 复 30/60 · 45 分） · 多邻国 1 节 25 分'))
   assert.ok(reportText.includes(`跑步 5km 30 分 6'00"/km ♥156`))
-  assert.ok(reportText.includes('跳绳 1200 个 10 分 120 次/分 ♥135'))
+  assert.ok(reportText.includes('跳绳 1200 个（1 组）10 分 120 次/分 ♥135'))
   assert.ok(reportText.includes('引体 3 组（40+35+30 秒）'), 'every set shows its own support time')
   assert.ok(reportText.includes('平板 2 组（60+45 秒）'), 'every hold shows its own seconds')
   assert.ok(
@@ -270,8 +270,8 @@ check('a legacy rope set list merges into the same figure', () => {
     },
   }
   assert.ok(
-    dayReport(legacy, reportClock, t).includes('跳绳 270 个 3 分 90 次/分 ♥140'),
-    'an old document reads as one record, not as a list of sets',
+    dayReport(legacy, reportClock, t).includes('跳绳 270 个（2 组）3 分 90 次/分 ♥140'),
+    'the report reads the day as totals, and says how many sets they came from',
   )
 })
 check('tasks: unfinished and today-or-later finished, each with its deadline', () => {

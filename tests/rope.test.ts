@@ -1,10 +1,11 @@
 /**
- * Jump-rope rules: one record a day, a free count, and the legacy sets that
- * still live in old documents.
+ * Jump-rope rules: several sets a day, a free count, and the legacy documents
+ * that still carry one record or a list of preset sets.
  *
- * The merge is the compatibility seam between the two shapes, so the cases
- * that matter are the ones a hand-written document can produce: sets out of
- * order, a measurement on only one of them, and a zero-length record.
+ * The merge is where a day's sets become the totals the card, the report and
+ * the statistics read, so the cases that matter are the ones a hand-written
+ * document can produce: sets out of order, a measurement on only one of them,
+ * and a zero-length record.
  */
 import { strict as assert } from 'node:assert'
 import {
@@ -41,13 +42,13 @@ console.log('merging a day')
 check('nothing recorded is nothing, not a zero record', () => {
   assert.equal(mergeRope([]), null)
 })
-check('one record passes through, keeping its identity', () => {
+check('one set is its own total, and says so', () => {
   assert.deepEqual(
     mergeRope([{ id: 'r1', at: '2026-09-20T10:00:00', count: 300, seconds: 120, avgHr: 130 }]),
-    { id: 'r1', at: '2026-09-20T10:00:00', count: 300, seconds: 120, avgHr: 130 },
+    { id: 'r1', at: '2026-09-20T10:00:00', sets: 1, count: 300, seconds: 120, avgHr: 130 },
   )
 })
-check('legacy sets: earliest time, added counts and seconds, weighted heart rate', () => {
+check('a day of sets: earliest time, added counts and seconds, weighted heart rate', () => {
   const merged = mergeRope([
     { id: 'r1', at: '2026-09-20T10:00:00', preset: 90, seconds: 60, avgHr: 120 },
     { id: 'r2', at: '2026-09-20T09:30:00', preset: 180, seconds: 120, avgHr: 150 },
@@ -55,11 +56,23 @@ check('legacy sets: earliest time, added counts and seconds, weighted heart rate
   assert.deepEqual(merged, {
     id: 'r2',
     at: '2026-09-20T09:30:00',
+    sets: 2,
     count: 270,
     seconds: 180,
     // (120×60 + 150×120) / 180
     avgHr: 140,
   })
+})
+check('free counts add up the same way a preset list did', () => {
+  // The shape a board write produces now: two sets, both with a free count.
+  const merged = mergeRope([
+    { id: 'r1', at: '2026-11-09T20:14:00', count: 480, seconds: 480, avgHr: 128 },
+    { id: 'r2', at: '2026-11-09T20:31:00', count: 400, seconds: 420, avgHr: 134 },
+  ])
+  assert.equal(merged?.sets, 2)
+  assert.equal(merged?.count, 880)
+  assert.equal(merged?.seconds, 900)
+  assert.equal(merged?.avgHr, 131)
 })
 check('an unmeasured set does not dilute the average', () => {
   assert.equal(

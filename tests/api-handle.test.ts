@@ -207,19 +207,30 @@ await checkAsync('every session kind lands in its own array and moves the derive
   assert.equal((state.day as { progress: { done: number } }).progress.done, 3, 'and nothing else was earned')
 })
 
-await checkAsync('jump rope is one record a day, and a second write replaces it', async () => {
+await checkAsync('jump rope appends a set, and each set is its own record', async () => {
   const api = createHarness()
   await api.state('POST', '/session', { date: DATE, kind: 'rope', entry: { count: 90, seconds: 45 } })
   const second = await api.state('POST', '/session', {
     date: DATE, kind: 'rope', entry: { count: 180, seconds: 90, avgHr: 140 },
   })
   const rope = (second.day as {
-    day: { rope: readonly { count?: number; seconds: number; avgHr?: number }[] }
+    day: { rope: readonly { id: string; count?: number; seconds: number; avgHr?: number }[] }
   }).day.rope
-  assert.equal(rope.length, 1, 'the day holds one record, like a run')
-  assert.equal(rope[0]!.count, 180)
-  assert.equal(rope[0]!.seconds, 90)
-  assert.equal(rope[0]!.avgHr, 140)
+  assert.equal(rope.length, 2, 'a second write adds a set instead of replacing the day')
+  assert.equal(rope[0]!.count, 90, 'the first set is untouched')
+  assert.equal(rope[1]!.count, 180)
+  assert.equal(rope[1]!.avgHr, 140)
+
+  // One set is retimed, recounted and deleted on its own.
+  const patched = await api.state('PATCH', '/session', {
+    date: DATE, kind: 'rope', id: rope[1]!.id, patch: { count: 200 },
+  })
+  const afterPatch = (patched.day as { day: { rope: readonly { count?: number }[] } }).day.rope
+  assert.deepEqual(afterPatch.map(set => set.count), [90, 200])
+
+  const removed = await api.state('DELETE', `/session?date=${DATE}&kind=rope&id=${rope[0]!.id}`)
+  const afterRemove = (removed.day as { day: { rope: readonly { count?: number }[] } }).day.rope
+  assert.deepEqual(afterRemove.map(set => set.count), [200], 'only the addressed set goes')
 })
 
 await checkAsync('a legacy rope set list still reads, and the statistics merge it', async () => {

@@ -22,7 +22,6 @@ import {
 } from '../api.ts'
 import { useCopy } from '../copy/index.tsx'
 import type { ClockView, StateView, VocabProgress } from '../types.ts'
-import { mergeRope } from '../../shared/rope.ts'
 import { CheckTile, LaundryTile, MealBoard } from './cards.tsx'
 import { Chip } from './Chip.tsx'
 import { DateNav } from './DateNav.tsx'
@@ -225,9 +224,6 @@ export function BoardBody({
   const day = state?.day
   const record = day?.day ?? null
   const pending = state?.stock.pending ?? 0
-  // The day's rope as one record: new days already hold one, and a legacy
-  // document's sets are merged here so the tile edits the figure it shows.
-  const rope = record === null ? null : mergeRope(record.rope)
 
   const goTo = (target: string): void => {
     setDate(target)
@@ -388,14 +384,7 @@ export function BoardBody({
           }))}
           onClear={() => void act(() => client.clearRun(date))}
         />
-        <RopeTile
-          rope={rope}
-          busy={busy}
-          // One record a day: a write *is* the edit, so both the create button
-          // and the ✎ form land here, and the delete clears the day's record.
-          onSet={payload => void act(() => client.addSession(date, 'rope', payload))}
-          onClear={() => void act(() => client.removeSession(date, 'rope', rope?.id ?? ''))}
-        />
+        <RopeTile sessions={record?.rope ?? []} {...sessionHandlers('rope')} />
         <PullupCard sessions={record?.pullup ?? []} {...sessionHandlers('pullup')} />
         <PlankCard sessions={record?.plank ?? []} {...sessionHandlers('plank')} />
         <EquipmentCard sessions={record?.equipment ?? []} {...sessionHandlers('equipment')} />

@@ -167,7 +167,11 @@ function fitnessLine(state: StateView, t: Copy): Line {
     const rope = mergeRope(record.rope)
     if (rope !== null) {
       const tempo = ropeTempo(rope.count, rope.seconds)
-      parts.push(t('report.rope', { count: rope.count, duration: durationText(ropeDurationOf(rope.seconds), t) })
+      parts.push(t('report.rope', {
+        count: rope.count,
+        sets: rope.sets,
+        duration: durationText(ropeDurationOf(rope.seconds), t),
+      })
         + `${tempo === undefined ? '' : ` ${t('report.tempo', { tempo: fractionText(tempo) })}`}`
         + `${rope.avgHr === undefined ? '' : ` ♥${rope.avgHr}`}`)
     }
