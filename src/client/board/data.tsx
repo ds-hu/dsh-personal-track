@@ -101,7 +101,12 @@ export function DataCard({ client, onImported }: DataCardProps): JSX.Element {
       const { report: done } = result
       dispatch({ kind: 'imported' })
       setError(null)
-      setNote(t('data.imported', { days: done.days, media: done.media, tasks: done.tasks })
+      setNote(t('data.imported', {
+        days: done.days,
+        media: done.media,
+        tasks: done.tasks,
+        todos: done.todos,
+      })
         + (done.assets === 0 ? '' : t('data.imported.assets', { count: done.assets }))
         + (done.removed === 0 ? '' : t('data.imported.removed', { count: done.removed })))
       onImported()
@@ -158,6 +163,7 @@ export function DataCard({ client, onImported }: DataCardProps): JSX.Element {
                 days: staged.days?.length ?? 0,
                 media: staged.media?.length ?? 0,
                 tasks: staged.tasks?.length ?? 0,
+                todos: staged.todos?.length ?? 0,
               })}
             </span>
             <span className="pt-grow" />

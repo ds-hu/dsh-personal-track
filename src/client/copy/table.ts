@@ -381,14 +381,14 @@ export const COPY = {
   'data.sweep': { zh: '清理未引用图片', en: 'Sweep unreferenced images' },
   'data.exported': { zh: '已导出 {days} 天记录', en: 'Exported {days} days' },
   'data.imported': {
-    zh: '导入完成：{days} 天、{media} 影视书籍、{tasks} 任务',
-    en: 'Imported {days} days, {media} films and books, {tasks} tasks',
+    zh: '导入完成：{days} 天、{media} 影视书籍、{tasks} 任务、{todos} 条待办',
+    en: 'Imported {days} days, {media} films and books, {tasks} tasks, {todos} todos',
   },
   'data.imported.assets': { zh: '、{count} 张图片', en: ', {count} images' },
   'data.imported.removed': { zh: '，清掉 {count} 条本地多余记录', en: ' ({count} extra local records removed)' },
   'data.staged': {
-    zh: '{days} 天、{media} 影视书籍、{tasks} 任务',
-    en: '{days} days, {media} films and books, {tasks} tasks',
+    zh: '{days} 天、{media} 影视书籍、{tasks} 任务、{todos} 条待办',
+    en: '{days} days, {media} films and books, {tasks} tasks, {todos} todos',
   },
   'data.merge': { zh: '合并', en: 'Merge' },
   'data.replace': { zh: '覆盖（清空现有）', en: 'Replace (clear what is there)' },

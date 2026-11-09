@@ -52,6 +52,20 @@ check('a row that takes figures takes the same ones in both languages', () => {
   }
 })
 
+check('the staged sentence and the import summary name the same record classes', () => {
+  // Two sentences about one file — what it carries, before and after the write.
+  // A class added to one and forgotten in the other is how the import panel came
+  // to report two registries while the write underneath it moved three, and the
+  // third one was the one a `replace` could destroy in silence.
+  for (const language of ['zh', 'en'] as const) {
+    assert.deepEqual(
+      placeholders(COPY['data.imported'][language]),
+      placeholders(COPY['data.staged'][language]),
+      `data.imported and data.staged disagree on what an import carries (${language})`,
+    )
+  }
+})
+
 check('every language keeps its own copy of every row', () => {
   // A projected dictionary must not alias the table: a later edit cannot leak
   // one language into the other through a shared object.
