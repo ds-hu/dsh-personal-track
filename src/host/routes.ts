@@ -109,6 +109,42 @@ const ownerTarget = z.object({
 })
 
 /**
+ * Whether `value` is canonical base64, decided by a scan and never by a regex.
+ *
+ * The obvious pattern — `/^[A-Za-z0-9+/]+={0,2}$/` — is a trap at this size. A
+ * greedy character-class loop leaves the regexp engine one backtracking entry
+ * per character, and the engine's stack is capped: at roughly 4 MiB of payload
+ * (a 3 MiB image, far below this module's own 10 MiB cap) `.test()` stops
+ * answering `false` and **throws** instead. Thrown from inside a zod check the
+ * error is not an `ApiError`, so `api.ts`'s catch-all answered 500
+ * `habit/internal` and a pasted screenshot failed with no explanation — which
+ * is exactly the report this replaced. A scan reads the same characters with no
+ * stack at all.
+ *
+ * The rules are the canonical ones: a multiple of four characters, `=` only as
+ * the last one or two, everything else from the standard alphabet.
+ *
+ * @param value - the payload to check.
+ * @returns whether it can be decoded as base64 without guessing.
+ */
+export function isCanonicalBase64(value: string): boolean {
+  const length = value.length
+  if (length === 0 || length % 4 !== 0) return false
+  const padding = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0
+  const body = length - padding
+  for (let index = 0; index < body; index += 1) {
+    const code = value.charCodeAt(index)
+    const alphabet = (code >= 65 && code <= 90) // A-Z
+      || (code >= 97 && code <= 122) // a-z
+      || (code >= 48 && code <= 57) // 0-9
+    // `+` and `/` are the two non-alphanumerics of the standard alphabet; a `=`
+    // anywhere before the padding is a shape error, so it fails here too.
+    if (!alphabet && code !== 43 && code !== 47) return false
+  }
+  return true
+}
+
+/**
  * One image's base64 payload: base64 by shape, bounded by the wire cap.
  *
  * The cap is checked on the **decoded** byte count, because that is the number
@@ -116,10 +152,7 @@ const ownerTarget = z.object({
  * length is up to three bytes coarser than the payload it carries, so a limit
  * compared against the string would let a payload of `MAX + 1` bytes through.
  */
-const imageData = z.string().min(1).refine(
-  (value) => /^[A-Za-z0-9+/]+={0,2}$/.test(value) && value.length % 4 === 0,
-  'data must be base64',
-).refine(
+const imageData = z.string().min(1).refine(isCanonicalBase64, 'data must be base64').refine(
   (value) => base64Bytes(value) <= MAX_IMAGE_BYTES,
   '图片超过上限',
 )

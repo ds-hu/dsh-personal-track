@@ -17,7 +17,7 @@
 import { strict as assert } from 'node:assert'
 import { createChecker, createHarness } from './support.ts'
 import { MAX_IMAGE_BYTES } from '../src/shared/route.ts'
-import { MAX_MATERIAL_CHARS } from '../src/host/routes.ts'
+import { MAX_MATERIAL_CHARS, isCanonicalBase64 } from '../src/host/routes.ts'
 
 const checker = createChecker('route handling (portless)')
 const { check, checkAsync, report } = checker
@@ -469,6 +469,42 @@ await checkAsync('a payload that is not base64, or is over the wire cap, is refu
 
   const unknownOwner = await api.call('POST', '/asset', { kind: 'task', id: 'nope', mime: 'image/png', data: TINY_PNG })
   assert.equal(unknownOwner.status, 404, 'a material on a vanished entry is a missing key')
+})
+
+await checkAsync('a payload past four megabytes of base64 is a picture, not a 500', async () => {
+  const api = createHarness()
+  const task = await api.state('POST', '/tasks', { title: '截图' })
+  const id = (task.entry as { id: string }).id
+
+  // 3.2 MiB decoded is 4.27 MiB of base64 — past the point where a greedy
+  // `/^[A-Za-z0-9+/]+={0,2}$/` test stopped answering `false` and threw
+  // instead, which `api.ts`'s catch-all turned into a 500 the moment a
+  // screenshot was pasted (see `isCanonicalBase64`). That throw depends on the
+  // regexp engine's state, so a freshly started process does not reproduce it;
+  // what this case guards here is that the scan still accepts a payload of that
+  // shape, and that it reads the alphabet and the padding the same way.
+  const data = Buffer.alloc(3_200_000, 0x41).toString('base64')
+  const added = await api.entry('POST', '/asset', { kind: 'task', id, mime: 'image/png', data })
+  assert.equal(
+    (added.materials as { bytes?: number }[])[0]?.bytes,
+    3_200_000,
+    'a four-megabyte payload lands whole',
+  )
+
+  const shapes: readonly (readonly [string, boolean])[] = [
+    ['AAAA', true],
+    ['AAA=', true],
+    ['AA==', true],
+    ['A+/A', true],
+    ['A===', false],
+    ['A=AA', false],
+    ['AAA!', false],
+    ['AAA', false],
+    ['', false],
+  ]
+  for (const [value, expected] of shapes) {
+    assert.equal(isCanonicalBase64(value), expected, `base64 shape of ${JSON.stringify(value)}`)
+  }
 })
 
 await checkAsync('text blocks are added, rewritten and removed over HTTP', async () => {
