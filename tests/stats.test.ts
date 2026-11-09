@@ -314,6 +314,43 @@ await checkAsync('tasks separate what was done in range from what is still open'
   assert.equal(stats.tasks.overdue, 1, 'only t4 is past due and unfinished')
 })
 
+// --- focus time ---------------------------------------------------------------
+
+await checkAsync("a todo's focus time is in the total, beside a task's and a film's", async () => {
+  const api = createHarness()
+  // Written as stored records, one closed hour each: `startFocus`/`endFocus`
+  // would stamp the wall clock, and this range is a fixed week.
+  const closed = (id: string): unknown => ({
+    id, startedAt: `${WED}T09:00:00`, endedAt: `${WED}T10:00:00`,
+  })
+  await api.store.putMedia({
+    id: 'm1', kind: 'film', title: '片', status: 'active', createdAt: 'c',
+    focusSessions: [closed('fm')],
+  } as never)
+  await api.store.putTask({
+    id: 't1', title: '作业', progress: { current: 0 }, createdAt: 'c',
+    focusSessions: [closed('ft')],
+  } as never)
+  await api.store.putTodo({
+    id: 'd1', title: '待办', done: false, createdAt: 'c',
+    focusSessions: [closed('fd')],
+  } as never)
+
+  // The same three hours the column prints on the three rows.
+  const view = api.store.view(WED, WED)
+  assert.deepEqual(
+    [view.media[0]?.focusSeconds, view.tasks[0]?.focusSeconds, view.todos[0]?.focusSeconds],
+    [3600, 3600, 3600],
+    'every registry entry carries the hour it was focused on',
+  )
+  const stats = buildStats(api.store, WED, WED, boundaryOf(api.config))
+  assert.deepEqual(
+    stats.focus,
+    { seconds: 3 * 3600, sessions: 3 },
+    'and 累计专注 is their sum: a total that left the todo out would contradict its own row',
+  )
+})
+
 await checkAsync('a run from a day outside the range is not counted', async () => {
   const api = createHarness()
   await api.store.mutateDay(MON, day => ({ ...day, run: { at: 'x', minutes: 30, distanceKm: 5, avgHr: 150 } }))

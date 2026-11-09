@@ -474,7 +474,7 @@ export interface StatsView {
     readonly doing: number
     readonly overdue: number
   }
-  /** Focus time over both registries: closed sessions that started in range. */
+  /** Focus time over all three registries: closed sessions that started in range. */
   readonly focus: {
     readonly seconds: number
     readonly sessions: number

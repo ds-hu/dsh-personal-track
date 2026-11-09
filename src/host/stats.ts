@@ -149,11 +149,14 @@ export interface StatsView {
     readonly overdue: number
   }
   /**
-   * Time spent in focus mode, over both registries.
+   * Time spent in focus mode, over all three registries.
    *
    * A session belongs to the habit day it **started** on, and only closed ones
    * count — an open session has no honest end
-   * (docs/adr/0002-derived-state-not-stored.md).
+   * (docs/adr/0002-derived-state-not-stored.md). A todo's session counts here
+   * like any other: the column prints that time on the row, and a total that
+   * left it out would contradict the number standing next to it. What stays out
+   * of the statistics is a todo's *completion*, not the hours spent on it.
    */
   readonly focus: {
     readonly seconds: number
@@ -359,6 +362,7 @@ export function buildStats(
   const closedFocus = [
     ...registry.media.flatMap(entry => entry.focusSessions),
     ...registry.tasks.flatMap(entry => entry.focusSessions),
+    ...registry.todos.flatMap(entry => entry.focusSessions),
   ].flatMap(session => (session.endedAt === undefined || !finishedInRange(session.startedAt)
     ? []
     : [{ startedAt: session.startedAt, endedAt: session.endedAt }]))
