@@ -109,7 +109,7 @@ const ownerTarget = z.object({
 })
 
 /**
- * Whether `value` is canonical base64, decided by a scan and never by a regex.
+ * Whether `value` is a base64 payload, decided by a scan and never by a regexp.
  *
  * The obvious pattern — `/^[A-Za-z0-9+/]+={0,2}$/` — is a trap at this size. A
  * greedy character-class loop leaves the regexp engine one backtracking entry
@@ -121,24 +121,31 @@ const ownerTarget = z.object({
  * is exactly the report this replaced. A scan reads the same characters with no
  * stack at all.
  *
- * The rules are the canonical ones: a multiple of four characters, `=` only as
- * the last one or two, everything else from the standard alphabet.
+ * The rules are the pattern's, no stricter: the standard alphabet, with `=` only
+ * as the last character or two, and at least one character in front of it. An
+ * earlier version of this scan also demanded a length divisible by four, which
+ * quietly rejected unpadded payloads the pattern had accepted — a narrowing
+ * nothing needed (`Buffer.from` decodes both spellings to the same bytes) that
+ * the commit introducing it described as a change of nothing at all.
  *
  * @param value - the payload to check.
  * @returns whether it can be decoded as base64 without guessing.
  */
-export function isCanonicalBase64(value: string): boolean {
-  const length = value.length
-  if (length === 0 || length % 4 !== 0) return false
-  const padding = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0
-  const body = length - padding
-  for (let index = 0; index < body; index += 1) {
+export function isBase64Payload(value: string): boolean {
+  // Padding is read off the end first, so the scan below covers the body alone.
+  let end = value.length
+  while (end > 0 && value.charCodeAt(end - 1) === 61) end -= 1
+  const padding = value.length - end
+  // `=` is legal only as the last one or two characters, and never alone: the
+  // body needs at least one alphabet character in front of it.
+  if (padding > 2 || end === 0) return false
+  for (let index = 0; index < end; index += 1) {
     const code = value.charCodeAt(index)
     const alphabet = (code >= 65 && code <= 90) // A-Z
       || (code >= 97 && code <= 122) // a-z
       || (code >= 48 && code <= 57) // 0-9
     // `+` and `/` are the two non-alphanumerics of the standard alphabet; a `=`
-    // anywhere before the padding is a shape error, so it fails here too.
+    // before the padding is a shape error, so it fails here too.
     if (!alphabet && code !== 43 && code !== 47) return false
   }
   return true
@@ -152,7 +159,7 @@ export function isCanonicalBase64(value: string): boolean {
  * length is up to three bytes coarser than the payload it carries, so a limit
  * compared against the string would let a payload of `MAX + 1` bytes through.
  */
-const imageData = z.string().min(1).refine(isCanonicalBase64, 'data must be base64').refine(
+const imageData = z.string().min(1).refine(isBase64Payload, 'data must be base64').refine(
   (value) => base64Bytes(value) <= MAX_IMAGE_BYTES,
   '图片超过上限',
 )

@@ -17,7 +17,7 @@
 import { strict as assert } from 'node:assert'
 import { createChecker, createHarness } from './support.ts'
 import { MAX_IMAGE_BYTES } from '../src/shared/route.ts'
-import { MAX_MATERIAL_CHARS, isCanonicalBase64 } from '../src/host/routes.ts'
+import { MAX_MATERIAL_CHARS, isBase64Payload } from '../src/host/routes.ts'
 
 const checker = createChecker('route handling (portless)')
 const { check, checkAsync, report } = checker
@@ -501,6 +501,21 @@ await checkAsync('an image travels as bytes and reads back as a binary response'
   assert.equal(fetched.contentType, 'image/png', 'the response carries the stored mime')
   assert.deepEqual(fetched.bytes, Buffer.from(TINY_PNG, 'base64'), 'and the bytes it stored')
   assert.equal(fetched.body.ok, undefined, 'a binary response is not a JSON envelope')
+
+  // The same payload with its padding stripped. Every encoder that emits
+  // base64url, and the raw variants in PHP and Go, spell the same bytes this
+  // way — the scan replaced a regexp, not the contract, so this has to land.
+  const unpadded = TINY_PNG.replace(/=+$/, '')
+  assert.notEqual(unpadded, TINY_PNG, 'the fixture has padding to strip')
+  const raw = await api.entry('POST', '/asset', {
+    kind: 'task', id, mime: 'image/png', data: unpadded, name: '讲义-raw.png',
+  })
+  const rawMaterial = (raw.materials as { bytes?: number }[])[1]
+  assert.equal(
+    rawMaterial?.bytes,
+    Buffer.from(TINY_PNG, 'base64').length,
+    'an unpadded payload stores the same bytes as the padded spelling',
+  )
 })
 
 await checkAsync('a missing image is a 404, not an empty picture', async () => {
@@ -538,7 +553,7 @@ await checkAsync('a payload past four megabytes of base64 is a picture, not a 50
   // 3.2 MiB decoded is 4.27 MiB of base64 — past the point where a greedy
   // `/^[A-Za-z0-9+/]+={0,2}$/` test stopped answering `false` and threw
   // instead, which `api.ts`'s catch-all turned into a 500 the moment a
-  // screenshot was pasted (see `isCanonicalBase64`). That throw depends on the
+  // screenshot was pasted (see `isBase64Payload`). That throw depends on the
   // regexp engine's state, so a freshly started process does not reproduce it;
   // what this case guards here is that the scan still accepts a payload of that
   // shape, and that it reads the alphabet and the padding the same way.
@@ -550,19 +565,27 @@ await checkAsync('a payload past four megabytes of base64 is a picture, not a 50
     'a four-megabyte payload lands whole',
   )
 
+  // The shapes the replaced regexp accepted, unpadded payloads included. A
+  // scanner that also demanded a multiple of four would refuse the spelling
+  // every base64url encoder produces — the same bytes under another name.
   const shapes: readonly (readonly [string, boolean])[] = [
     ['AAAA', true],
     ['AAA=', true],
     ['AA==', true],
     ['A+/A', true],
+    ['AAA', true],
+    ['AA', true],
+    ['AA=', true],
+    ['A', true],
     ['A===', false],
     ['A=AA', false],
+    ['=AAA', false],
+    ['=', false],
     ['AAA!', false],
-    ['AAA', false],
     ['', false],
   ]
   for (const [value, expected] of shapes) {
-    assert.equal(isCanonicalBase64(value), expected, `base64 shape of ${JSON.stringify(value)}`)
+    assert.equal(isBase64Payload(value), expected, `base64 shape of ${JSON.stringify(value)}`)
   }
 })
 
