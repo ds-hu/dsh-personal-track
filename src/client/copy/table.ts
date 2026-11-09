@@ -362,6 +362,8 @@ export const COPY = {
 
   // ---- the left column's todos -------------------------------------------
   'todo.title': { zh: '待办', en: 'Todos' },
+  // The phone's fold row, which is the whole column when it is closed.
+  'todo.openCount': { zh: '{count} 条未完成', en: '{count} open' },
   'todo.add': { zh: '新建待办', en: 'Add a todo' },
   'todo.addHint': { zh: '加一条待办…', en: 'Add a todo…' },
   'todo.empty': { zh: '还没有待办：在上面写一条，按回车就行', en: 'No todos yet — type one above and press Enter' },

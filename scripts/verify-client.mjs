@@ -323,12 +323,29 @@ for (const body of splitBodies) {
   )
 }
 
-// On a phone the focus column only pushes the board down: focus mode is one tap
-// away from any row, so the column is dropped rather than stacked. Asserting the
-// exact block keeps it a deliberate rule instead of a stray `display:none`.
-assert.ok(
-  /@media\s*\(max-width:\s*720px\)\s*\{\s*\.pt-focus-col\s*\{\s*display:\s*none;?\s*\}\s*\}/.test(bare),
-  'the focus column is dropped on a phone rather than stacked above the board',
+// A phone has nowhere to put the column beside the board, so it folds into one
+// row instead of being dropped: that row is the only way into the list, and the
+// list is why the panel gets opened there at all. Both halves are asserted —
+// hiding the column without a way back is silent, because the panel would simply
+// have no todos and nothing on screen would say so.
+const phoneStart = bare.indexOf('@media (max-width: 720px)')
+assert.ok(phoneStart >= 0, 'the stylesheet has a phone breakpoint')
+const nextAtRule = bare.indexOf('@media', phoneStart + 6)
+const phoneBlock = bare.slice(phoneStart, nextAtRule < 0 ? undefined : nextAtRule)
+assert.match(
+  phoneBlock,
+  /\.pt-focus-col\s*\{\s*display:\s*none\s*;?\s*\}/,
+  'the focus column is folded away on a phone rather than stacked above the board',
+)
+assert.match(
+  phoneBlock,
+  /\.pt-todo-toggle\s*\{[^}]*display:\s*flex/,
+  'the phone draws the folded row that stands in for the column',
+)
+assert.match(
+  phoneBlock,
+  /\.pt-todo-col-open\s+\.pt-focus-col\s*\{[^}]*display:\s*flex[^}]*max-height:\s*\d+vh/,
+  'the folded column opens again, capped so the board keeps part of the screen',
 )
 
 // The run curve's shades are five custom properties the component names by

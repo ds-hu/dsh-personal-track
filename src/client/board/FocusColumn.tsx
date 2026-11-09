@@ -165,7 +165,7 @@ export function FocusColumn({
         <button type="submit" className="pt-icon" title={t('todo.add')}>＋</button>
       </form>
 
-      <div className="pt-todo-sec">{t('todo.title')}</div>
+      <div className="pt-todo-sec pt-todo-sec-list">{t('todo.title')}</div>
       {todos.length === 0
         ? <span className="pt-muted">{t('todo.empty')}</span>
         : todos.map(todo => (

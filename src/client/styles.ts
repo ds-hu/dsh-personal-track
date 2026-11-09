@@ -541,24 +541,67 @@ body[data-ds-dark-theme] .pt-track {
 }
 
 /* ---- the focus column ------------------------------------------------ */
+/*
+ * The column and the phone's fold are one stack, and the wrapper is what makes
+ * them the same slot of the row: it owns the width and the margins the column
+ * used to carry, so the board does not move when one replaces the other.
+ */
+.pt-todo-col {
+  flex: none; width: 300px; margin: 0 0 12px 14px;
+  display: flex; flex-direction: column; gap: 4px; min-width: 0;
+}
 .pt-focus-col {
-  flex: none; width: 300px; overflow-y: auto;
+  flex: 1 1 auto; min-width: 0; overflow-y: auto;
   display: flex; flex-direction: column; gap: 9px;
-  margin: 0 0 12px 14px; padding: 13px 14px;
+  padding: 13px 14px;
   border: 1px solid var(--pt-line-strong); border-radius: 14px; background: var(--pt-surface);
 }
+/*
+ * The fold row is a phone's affordance only. Hiding it above 720px also keeps
+ * it out of the tab order, which is right: there the column is always open, and
+ * a control that changes nothing is a trap for a keyboard.
+ */
+.pt-todo-toggle { display: none; }
 @media (max-width: 800px) {
-  .pt-focus-col { width: auto; margin: 0 14px 4px; }
+  .pt-todo-col { width: auto; margin: 0 14px 4px; }
 }
 /*
- * On a phone the column has nowhere to sit beside the board, so it only pushes
- * the board down. Focus mode is still one tap away — any row's title, or its ⤢
- * — and what the column shows is derived, so dropping it loses no state.
- * display:none takes it out of the flex row entirely, so the stack closes up
- * with no gap where it was.
+ * On a phone the column has nowhere to sit beside the board — but it is also the
+ * reason the panel gets opened there: the list you came to tick, and the box you
+ * came to type into. So it does not disappear; it folds into one row, and the
+ * row's count is what says whether it is worth opening at that moment.
+ *
+ * Opened, the column caps its height and scrolls inside itself, so the board
+ * below keeps whatever is left instead of being pushed off screen. The clock and
+ * the day's tally are hidden because the board's strip says both, ten lines
+ * down. Which of the two states is on is the only thing JavaScript knows —
+ * every rule here is a width, so no resize listener exists to disagree with.
  */
 @media (max-width: 720px) {
+  .pt-todo-col { margin: 0; }
+  .pt-todo-toggle {
+    display: flex; align-items: center; gap: 7px; width: auto;
+    margin: 0 14px 2px; padding: 6px 10px;
+    appearance: none; color: inherit; font: inherit; font-size: 12px; text-align: left;
+    border: 1px solid var(--pt-line-strong); border-radius: 12px;
+    background: var(--pt-surface); cursor: pointer;
+    transition: background .12s ease, border-color .12s ease;
+  }
+  .pt-todo-toggle:hover { background: var(--pt-surface-2); border-color: var(--pt-line-strong); }
+  .pt-todo-toggle-label { flex: none; font-weight: 600; }
+  .pt-todo-toggle-count {
+    flex: 1 1 auto; min-width: 0; font-size: 11px; opacity: .6;
+    font-variant-numeric: tabular-nums;
+  }
+  .pt-todo-toggle-chev { flex: none; font-size: 10px; opacity: .55; }
   .pt-focus-col { display: none; }
+  .pt-todo-col-open .pt-focus-col {
+    display: flex; max-height: 34vh; margin: 0 14px 2px;
+  }
+  /* Open, the row above already says 待办 — the column's own section head would
+     repeat it one line lower. Closed, the row is the only label there is. */
+  .pt-todo-col-open .pt-todo-sec-list { display: none; }
+  .pt-focus-col .pt-focus-date, .pt-focus-col .pt-focus-todo { display: none; }
 }
 .pt-focus-date { font-size: 12px; opacity: .7; display: flex; align-items: center; gap: 6px; }
 .pt-night-badge {

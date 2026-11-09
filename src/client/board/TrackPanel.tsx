@@ -62,6 +62,14 @@ function Panel({ client }: { readonly client: HabitClient }): JSX.Element {
   const [focused, setFocused] = useState<FocusTarget | null>(null)
   /** True while a todo write is in flight; the column's box and input rest. */
   const [todoBusy, setTodoBusy] = useState(false)
+  /**
+   * Whether the phone's folded column is open.
+   *
+   * It says nothing above 720px, where the column is always open and this row is
+   * `display:none` — no width is ever read in JavaScript, so a resize needs no
+   * listener and the fold cannot disagree with the layout it is folded into.
+   */
+  const [todosOpen, setTodosOpen] = useState(false)
   /** Bumped when focus mode closes, so the board re-reads the day it shows. */
   const [boardToken, setBoardToken] = useState(0)
   /** Reads issued so far, so an older answer cannot overwrite a newer one. */
@@ -187,6 +195,7 @@ function Panel({ client }: { readonly client: HabitClient }): JSX.Element {
   const focusedEntry = entryFor(focused)
   const overdue = snapshot === null ? 0 : snapshot.tasks.filter(task => task.overdue).length
   const remaining = snapshot === null ? 0 : snapshot.tasks.filter(task => task.state !== 'done').length
+  const openTodos = snapshot === null ? 0 : (snapshot.todos ?? []).filter(todo => !todo.done).length
   const views = useMemo(() => VIEWS.map(({ value, label }) => ({ value, label: t(label) })), [t])
 
   return (
@@ -200,21 +209,35 @@ function Panel({ client }: { readonly client: HabitClient }): JSX.Element {
 
       {view === 'board' ? (
         <div className="pt-track-body">
-          <FocusColumn
-            todos={snapshot?.todos ?? []}
-            focused={focusedEntries}
-            today={clock?.today ?? ''}
-            night={clock?.nightTail ?? false}
-            progress={snapshot?.day.progress}
-            remaining={remaining}
-            overdue={overdue}
-            busy={todoBusy}
-            onAdd={title => void writeTodo(() => client.addTodo({ title }))}
-            onToggle={todo => void writeTodo(() => client.patchTodo(todo.id, { done: !todo.done }))}
-            onRemove={todo => void writeTodo(() => client.removeTodo(todo.id))}
-            onFocusTodo={todo => setFocused({ kind: 'todo', id: todo.id })}
-            onFocusEntry={entry => setFocused(targetOf(entry))}
-          />
+          {/* The fold row and the column are one slot of the row: on a phone the
+              row stands in for the column, and open they sit stacked. */}
+          <div className={todosOpen ? 'pt-todo-col pt-todo-col-open' : 'pt-todo-col'}>
+            <button
+              type="button"
+              className="pt-todo-toggle"
+              aria-expanded={todosOpen}
+              onClick={() => setTodosOpen(open => !open)}
+            >
+              <span className="pt-todo-toggle-label">{t('todo.title')}</span>
+              <span className="pt-todo-toggle-count">{t('todo.openCount', { count: openTodos })}</span>
+              <span className="pt-todo-toggle-chev" aria-hidden="true">{todosOpen ? '▴' : '▾'}</span>
+            </button>
+            <FocusColumn
+              todos={snapshot?.todos ?? []}
+              focused={focusedEntries}
+              today={clock?.today ?? ''}
+              night={clock?.nightTail ?? false}
+              progress={snapshot?.day.progress}
+              remaining={remaining}
+              overdue={overdue}
+              busy={todoBusy}
+              onAdd={title => void writeTodo(() => client.addTodo({ title }))}
+              onToggle={todo => void writeTodo(() => client.patchTodo(todo.id, { done: !todo.done }))}
+              onRemove={todo => void writeTodo(() => client.removeTodo(todo.id))}
+              onFocusTodo={todo => setFocused({ kind: 'todo', id: todo.id })}
+              onFocusEntry={entry => setFocused(targetOf(entry))}
+            />
+          </div>
           <BoardBody
             client={client}
             onShowStats={() => setView('stats')}
