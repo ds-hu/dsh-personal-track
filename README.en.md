@@ -1,7 +1,7 @@
 # personal-track
 
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
-[![version](https://img.shields.io/badge/version-0.5.0-blue.svg)](./CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.6.0-blue.svg)](./CHANGELOG.md)
 [![tests](https://img.shields.io/badge/tests-pnpm%20test-informational.svg)](./AGENTS.md#commands)
 [![DSH plugin](https://img.shields.io/badge/DSH-plugin-6b4bd6.svg)](https://github.com/deepseek-ai/deepseek-harness)
 [![platform](https://img.shields.io/badge/platform-web-46aeb0.svg)](#install)
@@ -27,7 +27,7 @@ shell's language (English / 中文).
 | Daily | Washing up ×2, shower, laundry (a stock gauge and a wash session are separate records) |
 | Meals | Breakfast / lunch / dinner: one tap stamps the time, editable with a price |
 | Study | Vocabulary (weighted against the day's target; a review word counts a fifth of a new one), Duolingo (any number of lessons) |
-| Training | Run (pace derived), jump rope (free count, tempo derived), pull-ups, plank, gym equipment, free-form training |
+| Training | Run (pace derived), jump rope (several sets a day, tempo derived), pull-ups, plank, gym equipment, free-form training |
 | Records | Films and books (three states + rating), tasks (progress → three states + overdue, draggable bar, checkpoints) |
 
 **The completion bar is fractional, not a row of checkboxes.** Beyond the nine habit
@@ -48,7 +48,8 @@ count.
 todo alone — it moves no task's progress and no task ticks it off. Below it is a **derived**
 "focused on" half: the tasks and titles that carry focus time, most recently worked on
 first; click a title to open focus mode. Neither half remembers anything in browser storage,
-so a reload, another tab or a deleted entry all answer the same way.
+so a reload, another tab or a deleted entry all answer the same way. On a phone (≤720px) the
+column folds into one row — "Todos · N open" — and opens on a tap, so the board keeps the screen.
 
 **Copy as plain text** flattens the day you are looking at into a few lines that paste
 into a chat: the completion figure, one line per group, then the task list (everything

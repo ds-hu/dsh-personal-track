@@ -1,7 +1,7 @@
 # personal-track
 
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
-[![version](https://img.shields.io/badge/version-0.5.0-blue.svg)](./CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.6.0-blue.svg)](./CHANGELOG.md)
 [![tests](https://img.shields.io/badge/tests-pnpm%20test-informational.svg)](./AGENTS.md#命令)
 [![DSH plugin](https://img.shields.io/badge/DSH-plugin-6b4bd6.svg)](https://github.com/deepseek-ai/deepseek-harness)
 [![platform](https://img.shields.io/badge/platform-web-46aeb0.svg)](#安装)
@@ -24,7 +24,7 @@
 | 日常 | 洗漱 ×2、洗澡、洗衣（存量 ±1 与「洗完」会话分开记） |
 | 饮食 | 早饭 / 午饭 / 晚饭：点一下盖时间戳，可改时间与价格 |
 | 学习 | 背单词（按当日目标、加权进度，复习词按 1/5 计）、多邻国（任意节数） |
-| 健身 | 跑步（配速派生）、跳绳（次数自由、节奏派生）、引体向上、平板支撑、健身器材、自由锻炼 |
+| 健身 | 跑步（配速派生）、跳绳（一天多组、节奏派生）、引体向上、平板支撑、健身器材、自由锻炼 |
 | 记录 | 影视书籍（三态 + 评分）、任务（进度 → 三态 + 逾期，可拖进度条，带检查点） |
 
 **完成条是分数的，不是复选框**：九个习惯格之外，当日到期的任务各占一格，所以读数是 `5.3/10` 这样的小数；
@@ -37,6 +37,7 @@
 **专注栏**是一张**待办**清单：上面直接写一条、按回车就加上，勾选框只管它自己的完成（与任何任务的进度无关）；
 下面一栏是**派生**的"专注过"——有专注记录的任务与影视书籍，按最近一次专注排在最前，点标题进专注模式。
 待办本身也不存"最近"这类记忆：刷新、换标签页、删掉条目之后，两栏都与历史一致。
+手机（≤720px）上这一栏折成一行「待办 · N 条未完成」，点开才展开，看板因此不被推走。
 
 **复制纯文本报告**把正在看的一天折成几行贴得进聊天：完成度、每组习惯一行，末尾是任务列表
 （全部未完成 + 当日及以后截止的已完成，每条都写截止日 `M-D`，逾期注明，已完成行末 `✓`）。
