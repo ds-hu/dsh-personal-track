@@ -199,6 +199,13 @@ export function useMaterialSection(options: {
         <span className="pt-fo-mat-meta">{meta}</span>
         <span className="pt-grow" />
         <div className="pt-fo-mat-actions">
+          {/*
+            Both are ghosts on purpose. A task form ends in one filled accent —
+            its commit — and the blue `.pt-primary` this button used to wear
+            competed with it forty pixels away: two "main actions" in a card
+            that has exactly one. What these two do is equally weighted anyway:
+            attach a block, attach an image.
+          */}
           <button
             type="button"
             className="pt-ghost"
@@ -207,7 +214,7 @@ export function useMaterialSection(options: {
           >＋ {t('material.text')}</button>
           <button
             type="button"
-            className="pt-primary"
+            className="pt-ghost"
             disabled={busy}
             onClick={() => picker.current?.click()}
           >

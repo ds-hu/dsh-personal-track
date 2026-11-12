@@ -105,15 +105,35 @@ body[data-ds-dark-theme] .pt-track {
 .pt-primary:active:not(:disabled) { transform: scale(.97); }
 .pt-primary:disabled { opacity: .4; cursor: default; }
 
-.pt-ghost {
+/*
+ * .pt-btn is the form's own commit pair (see FieldForm): the cancel side is a
+ * ghost pill like every other secondary here, and .pt-btn-primary is the one
+ * accent a form carries.
+ *
+ * Green, not the blue of .pt-primary: blue marks an action that stages
+ * something (add a material, export the backup), while green is this board's
+ * "this got written down" colour — the same one the completion bars and the
+ * done tone use. Keeping the two apart is also what stops a card from growing
+ * two competing primaries: a task form shows one filled button, the commit.
+ */
+.pt-ghost, .pt-btn {
   appearance: none; border: 1px solid var(--pt-line); background: transparent;
   color: inherit; border-radius: 8px; padding: 4px 9px;
   font: inherit; font-size: 12px; opacity: .8; cursor: pointer;
   transition: background .12s ease, opacity .12s ease, transform .08s ease;
 }
-.pt-ghost:hover:not(:disabled) { background: var(--pt-surface-2); opacity: 1; }
-.pt-ghost:active:not(:disabled) { transform: scale(.97); }
-.pt-ghost:disabled { opacity: .35; cursor: default; }
+.pt-ghost:hover:not(:disabled), .pt-btn:hover:not(:disabled) { background: var(--pt-surface-2); opacity: 1; }
+.pt-ghost:active:not(:disabled), .pt-btn:active:not(:disabled) { transform: scale(.97); }
+.pt-ghost:disabled, .pt-btn:disabled { opacity: .35; cursor: default; }
+
+/* Always worn together with .pt-btn; it only has to say "accent". */
+.pt-btn-primary {
+  border-color: var(--pt-accent-line); background: var(--pt-accent-soft);
+  color: inherit; font-weight: 600; opacity: 1; padding: 4px 14px;
+}
+.pt-btn-primary:hover:not(:disabled) {
+  background: rgba(90,175,120,.26); border-color: var(--pt-accent);
+}
 
 .pt-icon {
   appearance: none; width: 22px; height: 22px;
@@ -294,7 +314,25 @@ body[data-ds-dark-theme] .pt-track {
 /* A field that lists several things (the checkpoints) takes the whole row. */
 .pt-field-wide { flex: 1 1 100%; }
 .pt-field-wide textarea { resize: vertical; min-height: 3em; line-height: 1.5; }
-.pt-form-actions { display: flex; gap: 5px; }
+/*
+ * The commit pair sits at the form's right margin — the same vertical line the
+ * tile head's ＋ stands on — so a card ends where its actions are instead of
+ * trailing off into an empty corner. It follows the fields on their own line and
+ * drops to the next one's right edge when there is no room left.
+ */
+.pt-form-actions { display: flex; justify-content: flex-end; gap: 6px; margin-left: auto; }
+/*
+ * A form carrying a full-width block (the task form's materials area, so wide
+ * that this pair always ends up alone on its line) closes with a rule: "fill
+ * these in" and "commit this card" are two zones, not one flow. Compact forms
+ * stay on the fields' line and take no rule.
+ */
+.pt-form-wide .pt-form-actions {
+  flex: 1 1 100%; margin: 3px 0 0; padding-top: 8px;
+  border-top: 1px dashed var(--pt-line);
+}
+/* A refusal is read before the button it explains, never under it. */
+.pt-form > .pt-error { flex: 1 1 100%; }
 
 /*
  * ---- the material area inside the task form --------------------------

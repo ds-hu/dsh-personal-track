@@ -83,8 +83,10 @@ export interface FieldFormProps {
    * *anywhere in this form* — the notes box included — land in it.
    *
    * Absent for every form that takes no materials, and that absence is
-   * load-bearing: without it the form attaches no listeners at all, so a
-   * screenshot pasted elsewhere on the page keeps going where it always went.
+   * load-bearing twice over: without it the form attaches no listeners at all,
+   * so a screenshot pasted elsewhere on the page keeps going where it always
+   * went; and the form keeps its compact pose, with the commit pair trailing the
+   * fields instead of closing the card off with a rule (see `.pt-form-wide`).
    */
   readonly materials?: MaterialSection
 }
@@ -121,7 +123,7 @@ export function FieldForm({
 
   return (
     <div
-      className="pt-form"
+      className={materials === undefined ? 'pt-form' : 'pt-form pt-form-wide'}
       onPaste={materials?.onPaste}
       onDrop={materials?.onDrop}
       onDragOver={materials?.onDragOver}
@@ -173,11 +175,11 @@ export function FieldForm({
         </label>
       ))}
       {materials?.node}
-      <div className="pt-form-actions">
-        <button className="pt-btn pt-btn-primary" disabled={busy} onClick={submit}>{submitLabel}</button>
-        {onCancel === undefined ? null : <button className="pt-btn" onClick={onCancel}>{t('form.cancel')}</button>}
-      </div>
       {problem === null ? null : <div className="pt-error">{problem}</div>}
+      <div className="pt-form-actions">
+        {onCancel === undefined ? null : <button className="pt-btn" onClick={onCancel}>{t('form.cancel')}</button>}
+        <button className="pt-btn pt-btn-primary" disabled={busy} onClick={submit}>{submitLabel}</button>
+      </div>
     </div>
   )
 }

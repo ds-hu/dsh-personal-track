@@ -370,6 +370,36 @@ assert.match(
   'the dark ramp hangs off the shell\'s dark marker, not the OS preference',
 )
 
+// One accent per card, and it is the commit. A task form carried two filled
+// buttons forty pixels apart — the save pair and the materials area's
+// "add image" — in two different colours, so neither read as the main action and
+// the card's weight sat in its bottom-left corner. The pair now ends the form at
+// its right margin, on the same vertical line as the tile head's ＋; a form that
+// carries a materials area closes that row off with a rule; and the accent is
+// the board's green ("this was written down"), not the blue of a staging action.
+const commitBodies = bodiesFor('.pt-btn-primary')
+assert.ok(commitBodies.length > 0, 'the stylesheet declares the form\'s commit button')
+assert.ok(
+  commitBodies.some(body => /background:\s*var\(--pt-accent-soft\)/.test(body)
+    && /border-color:\s*var\(--pt-accent-line\)/.test(body)),
+  'the commit button is the board\'s green accent',
+)
+assert.ok(
+  !commitBodies.some(body => /--pt-info/.test(body)),
+  'the commit button is not the staging blue',
+)
+assert.ok(
+  bodiesFor('.pt-form-actions').some(body => /justify-content:\s*flex-end/.test(body)
+    && /margin-left:\s*auto/.test(body)),
+  'the commit pair is pinned to the form\'s right margin',
+)
+assert.ok(
+  bodiesFor('.pt-form-wide .pt-form-actions').some(body => /flex:\s*1 1 100%/.test(body)
+    && /border-top:\s*1px dashed var\(--pt-line\)/.test(body)),
+  'a form with a materials area closes its commit row with a rule',
+)
+
+
 // Focus mode has to close its session when the page goes away. A refresh is a
 // real end of the session, and a session left open is discarded by the store at
 // the next start — so the visit's time is lost. No type checker and no
@@ -502,6 +532,34 @@ for (const file of sources) {
   guarded += 1
 }
 assert.ok(guarded > 20, 'every client source but the table was checked')
+
+// The half of "one accent per card" that no stylesheet guard can see: which
+// class the markup wears. The commit pair is the only place a `.pt-btn-primary`
+// appears, and the materials area inside that same form carries none — that
+// button is what taught the card to show two primaries forty pixels apart.
+//
+// Comments are stripped first, as in the walk above: both files explain the rule
+// in prose that names the very class it forbids.
+const stripped = path => readFileSync(resolve(path), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/^[ \t]*\/\/.*$/gm, '')
+// A verdict, not a dump of the file: assert.doesNotMatch would print every line
+// of it.
+assert.ok(
+  !/pt-primary/.test(stripped('src/client/board/materials-field.tsx')),
+  'the materials area carries no primary button of its own',
+)
+const formSource = stripped('src/client/board/fields.tsx')
+assert.equal(
+  [...formSource.matchAll(/pt-btn-primary/g)].length,
+  1,
+  'a form renders exactly one commit button',
+)
+assert.ok(
+  formSource.indexOf("t('form.cancel')") >= 0
+    && formSource.indexOf("t('form.cancel')") < formSource.indexOf('pt-btn-primary'),
+  'cancel comes before save, so the commit ends at the form\'s right edge',
+)
 
 console.log('client bundle ✓  wrapper, exports, panel registration, injection face and styles verified')
 console.log(
