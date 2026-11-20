@@ -1,6 +1,6 @@
 /**
- * The plugin's one surface: 打卡 and 统计, with the focus column on the left of
- * the board view.
+ * The plugin's one surface: 打卡、统计与时间, with the focus column on the left
+ * of the board view.
  *
  * The panel owns what both views and the focus surfaces need — the registry
  * snapshot, the clock, and which entry focus mode is open on — while the board
@@ -17,6 +17,7 @@ import type { HabitClient } from '../api.ts'
 import { CopyProvider, useCopy } from '../copy/index.tsx'
 import type { CopyKey } from '../copy/table.ts'
 import type { LocaleService } from '../locale.ts'
+import type { UseSessionsHook } from '../slots.ts'
 import type { ClockView, StateView, TodoEntry } from '../types.ts'
 import { BoardBody } from './BoardBody.tsx'
 import { FocusColumn } from './FocusColumn.tsx'
@@ -31,29 +32,49 @@ import {
 } from './focus.ts'
 import { messageOf } from './format.ts'
 import { StatsPanel } from './stats-panel.tsx'
+import { TimePanel } from './TimePanel.tsx'
 import { Pills } from './tile.tsx'
 
-/** The two views inside the panel. */
-type ViewKey = 'board' | 'stats'
+/** The three views inside the panel. */
+type ViewKey = 'board' | 'stats' | 'time'
 
 const VIEWS: readonly { readonly value: ViewKey; readonly label: CopyKey }[] = [
   { value: 'board', label: 'panel.view.board' },
   { value: 'stats', label: 'panel.view.stats' },
+  { value: 'time', label: 'panel.view.time' },
 ]
 
 /** Props handed in by the slot registration's injection face. */
 export interface TrackPanelProps {
   readonly client: HabitClient
   readonly locale: LocaleService
+  /** The runtime's session list, for the time view's conversation titles. */
+  readonly useSessions: UseSessionsHook
 }
 
 /** The panel's root: it owns the language subscription for everything below. */
-export function TrackPanel({ client, locale }: TrackPanelProps): JSX.Element {
-  return <CopyProvider locale={locale}><Panel client={client} /></CopyProvider>
+export function TrackPanel({ client, locale, useSessions }: TrackPanelProps): JSX.Element {
+  const sessions = useSessions(state => state)
+  // The host sends session ids, never labels; the session list is the only
+  // place a conversation's title exists. The map is rebuilt when the list
+  // changes and is the same object every render in between.
+  const sessionTitles = useMemo(() => {
+    const titles: Record<string, string> = {}
+    for (const id of sessions.ids) titles[id] = sessions.byId[id]?.displayTitle ?? id
+    return titles
+  }, [sessions])
+  return (
+    <CopyProvider locale={locale}>
+      <Panel client={client} sessionTitles={sessionTitles} />
+    </CopyProvider>
+  )
 }
 
 /** Render the panel. */
-function Panel({ client }: { readonly client: HabitClient }): JSX.Element {
+function Panel({ client, sessionTitles }: {
+  readonly client: HabitClient
+  readonly sessionTitles: Readonly<Record<string, string>>
+}): JSX.Element {
   const t = useCopy()
   const [view, setView] = useState<ViewKey>('board')
   const [snapshot, setSnapshot] = useState<StateView | null>(null)
@@ -246,8 +267,10 @@ function Panel({ client }: { readonly client: HabitClient }): JSX.Element {
             onStateRead={mergeRegistry}
           />
         </div>
-      ) : (
+      ) : view === 'stats' ? (
         <StatsPanel client={client} />
+      ) : (
+        <TimePanel client={client} sessionTitles={sessionTitles} />
       )}
 
       {focused !== null && focusedEntry !== undefined ? (

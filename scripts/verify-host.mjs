@@ -366,6 +366,23 @@ assert.equal(tooLong.status, 400)
 assert.equal(tooLong.body.error.code, 'habit/range-too-large')
 console.log('statistics ✓  (the whole panel over HTTP, and its range guards)')
 
+// --- the one-day time view ---------------------------------------------------
+// `buildTime` is covered in tests/time.test.ts; this checks that the derived
+// day travels over HTTP, that its group total is the sum of its own rows, and
+// that the overview is a union rather than a second sum. No presence has been
+// posted at this point, so the conversation group is asserted empty; the
+// presence block at the end posts raw events and checks the populated rows.
+const dayTime = (await api.call('GET', '/time')).body
+assert.equal(dayTime.date, DATE, 'the time view defaults to the current habit day')
+assert.equal(dayTime.talk.length, 0, 'no presence posted yet: an empty group, not invented rows')
+assert.equal(dayTime.ticks.length, 7, 'seven four-hour labels, the last one the next day')
+const recordIds = dayTime.records.map(row => row.id)
+assert.ok(recordIds.includes('wash') && recordIds.includes('meals') && recordIds.includes('duolingo'))
+const recordSum = dayTime.records.reduce((sum, row) => sum + row.seconds, 0)
+assert.equal(dayTime.totals.records, recordSum, 'the record group total is the sum of its rows')
+assert.ok(dayTime.totals.covered <= dayTime.totals.focus + dayTime.totals.records, 'overlapping time is counted once')
+console.log('time view ✓  (the day over HTTP, its row totals and its union total)')
+
 // --- failure shapes ----------------------------------------------------------
 const unknown = await api.call('GET', '/nope')
 assert.equal(unknown.status, 404)
@@ -533,7 +550,8 @@ console.log('todos ✓  (a title and its own done, beside the two registries)')
 
 const backup = (await source.call('GET', '/backup')).body.backup
 assert.equal(backup.format, 'personal-track/backup')
-assert.equal(backup.version, 4, 'the column’s todos moved the file layout to 4')
+assert.equal(backup.version, 5, 'raw conversation presence moved the file layout to 5')
+assert.equal(backup.presence.length, 0, 'this fixture observed no conversation')
 assert.equal(backup.days.length, 1, 'the saved day is in the backup')
 assert.equal(backup.days[0].date, DATE)
 assert.equal(backup.tasks.length, 2)
@@ -642,6 +660,32 @@ assert.equal(noCounter.body.stock.pending, 0, 'and reads as zero afterwards')
 await restored.stop()
 await rm(BACKUP_ROOT, { recursive: true, force: true })
 console.log('backup ✓  (facts-only file, restore into a fresh root, merge vs replace, bad files refused)')
+
+// --- conversation presence: the tracker's route feeds the time view -----------
+const presenceSource = await mount()
+const presenceIn = await presenceSource.call('POST', '/presence', {
+  sessionId: 'conversation-1', clientId: 'client-1', connectionId: 'connection-1', state: 'in',
+})
+assert.equal(presenceIn.status, 200, 'a client can announce presence')
+const presencePrompt = await presenceSource.call('POST', '/presence', {
+  sessionId: 'conversation-1', clientId: 'client-1', connectionId: 'connection-1', state: 'prompt',
+})
+assert.equal(presencePrompt.status, 200)
+const presenceOut = await presenceSource.call('POST', '/presence', {
+  sessionId: 'conversation-1', clientId: 'client-1', connectionId: 'connection-1', state: 'out',
+})
+assert.equal(presenceOut.status, 200)
+
+const trackedTime = (await presenceSource.call('GET', `/time?date=${DATE}`)).body
+assert.equal(trackedTime.talk.length, 1, 'one conversation row, from the prompt tail')
+assert.equal(trackedTime.talk[0].id, 'conversation-1', 'the host keeps the session id, not a label')
+assert.equal(trackedTime.totals.talk, 120, 'the pinned clock makes the segment zero and the two-minute tail the whole row')
+assert.ok(trackedTime.totals.covered >= 120, 'and the prompt tail is part of the day’s recorded time')
+
+const badPresence = await presenceSource.call('POST', '/presence', { sessionId: 's' })
+assert.equal(badPresence.status, 400, 'an incomplete presence ping is refused')
+await presenceSource.stop()
+console.log('presence ✓  (host-stamped raw events become the conversation band)')
 
 await rm(ROOT, { recursive: true, force: true })
 console.log('\nhost half ✓  full API round-trip against real storage')

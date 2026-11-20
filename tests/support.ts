@@ -23,6 +23,7 @@ import {
 import type { DomainSpec } from '@deepseek-ai/dsh-storage-domain'
 import type { ZodType } from 'zod'
 import { type HabitHandler, type HabitRequest, type HabitResponse, API_PREFIX, createApiHandler } from '../src/host/api.ts'
+import { createPresence, type PresenceStore } from '../src/host/presence.ts'
 import { createHabitStore, type HabitStore } from '../src/host/store.ts'
 
 // --- the in-memory domain ----------------------------------------------------
@@ -175,6 +176,7 @@ export interface CallResult {
 export interface Harness {
   readonly store: HabitStore
   readonly backup: Backup
+  readonly presence: PresenceStore
   readonly config: Config
   /** The instant the harness's clock is pinned to. */
   readonly now: () => Date
@@ -207,7 +209,8 @@ export function createHarness(options: {
   // around it: if the config field ever stopped being honoured, this would
   // start stamping the real instant and the deterministic assertions would fail.
   const now = clockOf({ ...config, now: fixedClock(options.at ?? '2026-09-16T12:00:00Z') })
-  const handler: HabitHandler = createApiHandler({ store, backup, boundary, config, now })
+  const presence = createPresence({ domain, boundary, now })
+  const handler: HabitHandler = createApiHandler({ store, backup, presence, boundary, config, now })
 
   /** A request double: the body as an async iterable of chunks. */
   function request(method: string, url: string, body?: unknown): HabitRequest {
@@ -263,6 +266,7 @@ export function createHarness(options: {
   return {
     store,
     backup,
+    presence,
     config,
     now,
     call,

@@ -118,7 +118,7 @@ const guardedCtx = new Proxy(ctx, {
 
 exports_.apply(guardedCtx)
 
-assert.equal(seen.effects, 3, 'apply registers three effects (dictionaries, panel, sidebar entry)')
+assert.equal(seen.effects, 4, 'apply registers four effects (dictionaries, panel, sidebar entry, presence tracker)')
 assert.equal(appended.length, 1, 'apply injects the stylesheet exactly once')
 
 // The two dictionaries travel together, and they name the same keys: a
@@ -175,6 +175,15 @@ assert.equal(typeof panellist.component, 'function', 'the sidebar entry has an i
 const glyph = panellist.component({ size: 18 })
 assert.equal(glyph.type, 'svg', 'the sidebar glyph renders an svg')
 assert.equal(glyph.props.width, 18, 'the glyph honours the size it is handed')
+
+// The conversation tracker rides in the composer dock: a 1×1 marker, not a
+// visible row, and the one route it needs is the presence ping.
+const tracker = registrationFor('conversation.input.dock')
+assert.ok(tracker, 'the conversation presence tracker is registered')
+assert.equal(tracker.spec.id, 'personal-track-presence')
+assert.equal(typeof tracker.spec.inject, 'function', 'the tracker declares its injection face')
+assert.equal(typeof tracker.spec.inject().client.presence, 'function', 'the tracker can report presence')
+assert.equal(typeof tracker.component, 'function', 'the tracker is a component')
 
 // --- stylesheet guards -------------------------------------------------------
 //

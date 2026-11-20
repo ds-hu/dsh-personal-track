@@ -13,7 +13,7 @@
  * or hand-edited backup is refused as a whole instead of landing half-applied.
  */
 import { z } from 'zod'
-import { assetRecord, counterRecord, dayRecord, mediaRecord, taskRecord, todoRecord } from './domain.ts'
+import { assetRecord, counterRecord, dayRecord, mediaRecord, presenceDay, taskRecord, todoRecord } from './domain.ts'
 import type { HabitDomain } from './domain.ts'
 import type { DayKey } from '../shared/habit-day.ts'
 
@@ -37,18 +37,23 @@ export const BACKUP_FORMAT = 'personal-track/backup'
  * Version 4 adds the `todos` array. Same reasoning: a build from before it reads
  * a version 4 file as "no todos" and would silently drop the column's list on
  * the next export, which is exactly the loss a version number exists to refuse.
+ *
+ * Version 5 adds the `presence` array: the raw conversation events. Absent in
+ * versions 1–4, which means "no presence observed"; the read-side attention
+ * model is still derived, so a restored file carries observations, not the
+ * two-minute/three-minute windows.
  */
-export const BACKUP_VERSION = 4
+export const BACKUP_VERSION = 5
 
 /** Every file layout this build can read. */
-export const READABLE_BACKUP_VERSIONS: readonly number[] = [1, 2, 3, BACKUP_VERSION]
+export const READABLE_BACKUP_VERSIONS: readonly number[] = [1, 2, 3, 4, BACKUP_VERSION]
 
 const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/
 
 /** The file layout. Arrays, not maps: each record already carries its own key. */
 export const backupBundle = z.object({
   format: z.literal(BACKUP_FORMAT),
-  version: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
+  version: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
   /** When the file was written; informational, never applied on import. */
   exportedAt: z.string().min(1),
   days: z.array(dayRecord.extend({ date: z.string().regex(DATE_KEY, 'date must be YYYY-MM-DD') })),
@@ -59,6 +64,12 @@ export const backupBundle = z.object({
   todos: z.array(todoRecord).default([]),
   /** Material image bytes. Absent in a version 1 file, which carries no images. */
   assets: z.array(assetRecord).default([]),
+  /**
+   * Raw conversation presence events, per day. Absent before version 5, which
+   * means no observation; the attention windows are derived on read, never
+   * stored, so the file must not carry them.
+   */
+  presence: z.array(presenceDay.extend({ date: z.string().regex(DATE_KEY, 'date must be YYYY-MM-DD') })).default([]),
 })
 
 /** One parsed backup file. */
@@ -78,6 +89,8 @@ export interface ImportReport {
   readonly counters: number
   /** Material images carried by the file (version 2 and up). */
   readonly assets: number
+  /** Raw conversation events carried by the file (version 5 and up). */
+  readonly presence: number
   /** Records dropped because `replace` cleared keys the file did not carry. */
   readonly removed: number
 }
@@ -139,6 +152,7 @@ export function createBackup(domain: HabitDomain): Backup {
   const tasks = domain.table('tasks')
   const todos = domain.table('todos')
   const assets = domain.table('assets')
+  const presence = domain.table('presence')
 
   const byCreatedAt = <T extends { createdAt: string }>(records: T[]): T[] =>
     records.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))
@@ -170,6 +184,9 @@ export function createBackup(domain: HabitDomain): Backup {
         tasks: byCreatedAt([...tasks.entries()].map(([, record]) => record)),
         todos: byCreatedAt([...todos.entries()].map(([, record]) => record)),
         assets: [...assets.entries()].map(([, record]) => record),
+        presence: [...presence.entries()]
+          .map(([, record]) => record)
+          .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)),
       }
     },
 
@@ -198,6 +215,7 @@ export function createBackup(domain: HabitDomain): Backup {
       const mediaIds = new Set(bundle.media.map(record => record.id))
       const taskIds = new Set(bundle.tasks.map(record => record.id))
       const todoIds = new Set(bundle.todos.map(record => record.id))
+      const presenceKeys = new Set(bundle.presence.map(record => record.date as DayKey))
 
       let removed = 0
       if (mode === 'replace') {
@@ -209,6 +227,7 @@ export function createBackup(domain: HabitDomain): Backup {
         // Assets are keyed by id alone; `replace` clears the ones the file
         // omits, which is also what makes a restore into a dirty root exact.
         removed += await prune(assets, assetIds)
+        removed += await prune(presence, presenceKeys)
       }
 
       for (const record of bundle.days) await days.put(record.date as DayKey, record)
@@ -219,6 +238,7 @@ export function createBackup(domain: HabitDomain): Backup {
       for (const record of bundle.tasks) await tasks.put(record.id, record)
       for (const record of bundle.todos) await todos.put(record.id, record)
       for (const record of bundle.assets) await assets.put(record.id, record)
+      for (const record of bundle.presence) await presence.put(record.date as DayKey, record)
 
       return {
         mode,
@@ -228,6 +248,7 @@ export function createBackup(domain: HabitDomain): Backup {
         todos: bundle.todos.length,
         counters: counterKeys.size,
         assets: bundle.assets.length,
+        presence: bundle.presence.reduce((sum, record) => sum + record.events.length, 0),
         removed,
       }
     },

@@ -16,6 +16,7 @@ import type {
   StateView,
   StatsView,
   TaskEntry,
+  TimeView,
   TodoEntry,
 } from './types.ts'
 
@@ -78,6 +79,15 @@ export interface RunOptions {
 }
 
 /** The command surface the board receives through slot injection. */
+/** A client's presence transition, or the instant of a prompt. */
+export type PresenceState = 'in' | 'beat' | 'out' | 'prompt'
+
+/** Options for a presence ping; `keepalive` lets the closing `out` survive unload. */
+export interface PresenceOptions {
+  readonly keepalive?: boolean
+}
+
+/** The browser half of the API. */
 export interface HabitClient {
   clock(): Promise<ClockView>
   state(date?: string): Promise<StateView>
@@ -153,6 +163,21 @@ export interface HabitClient {
   endFocus(owner: RegistryKind, id: string, sessionId: string, options?: EndFocusOptions): Promise<EntryAnswer>
   /** Range aggregates, computed on the host. */
   stats(from: string, to: string): Promise<StatsView>
+  /** The one-day time view: focus, conversation and record rows plus totals. */
+  time(date: string): Promise<TimeView>
+  /**
+   * Report raw presence for the time view.
+   *
+   * The body carries no instant: the host stamps every event, so a device
+   * clock that is off cannot move the chart.
+   */
+  presence(
+    sessionId: string,
+    clientId: string,
+    connectionId: string,
+    state: PresenceState,
+    options?: PresenceOptions,
+  ): Promise<void>
   /** The whole domain as one portable document. */
   exportAll(): Promise<BackupBundle>
   /** Validate and apply a backup document; `replace` also drops what it omits. */
@@ -522,6 +547,28 @@ export function createHabitClient(options: HabitClientOptions = {}): HabitClient
       },
     ),
     stats: (from, to) => request<StatsView>(url('stats', { from, to })),
+    // The time view is newer than the route table a running host may have
+    // loaded. A 404 here is a stale host half, not a missing record: say so,
+    // instead of the dictionary's "no such record" for a route that is absent.
+    time: async date => {
+      try {
+        return await request<TimeView>(url('time', { date }))
+      } catch (cause) {
+        if (cause instanceof HabitApiError && cause.status === 404) throw staleHostError()
+        throw cause
+      }
+    },
+    presence: async (sessionId, clientId, connectionId, state, options) => {
+      try {
+        await request<{ ok: true }>(url('presence'), {
+          ...body('presence', { sessionId, clientId, connectionId, state }),
+          ...(options?.keepalive === true ? { keepalive: true } : {}),
+        })
+      } catch (cause) {
+        if (cause instanceof HabitApiError && cause.status === 404) throw staleHostError()
+        throw cause
+      }
+    },
     exportAll: async () => {
       const value = await request<{ ok: true; backup: BackupBundle }>(url('exportBackup'))
       if (value.backup === undefined) staleHost()

@@ -294,9 +294,31 @@ export type MediaRecordWire = Omit<MediaEntry, 'focusSeconds'>
 export type ImportMode = 'merge' | 'replace'
 
 /**
+ * One raw conversation presence event, as the backup carries it.
+ *
+ * A `presence` event has a `state`; a `prompt` is an instant. The attention
+ * windows are derived on read, so none of them is stored here.
+ */
+export interface PresenceEvent {
+  readonly id: string
+  readonly kind: 'presence' | 'prompt'
+  readonly state?: 'in' | 'beat' | 'out'
+  readonly sessionId: string
+  readonly clientId: string
+  readonly connectionId: string
+  readonly at: string
+}
+
+/** One habit day's raw presence events. */
+export interface PresenceDay {
+  readonly date: string
+  readonly events: readonly PresenceEvent[]
+}
+
+/**
  * One backup file: stored facts only. Nothing derived (cells, ratios, streaks,
- * overdue flags, focus durations, image sizes) is in here, so a restored file
- * cannot contradict itself.
+ * overdue flags, focus durations, image sizes, attention windows) is in here, so
+ * a restored file cannot contradict itself.
  */
 export interface BackupBundle {
   readonly format: string
@@ -310,6 +332,8 @@ export interface BackupBundle {
   readonly todos?: readonly TodoRecordWire[]
   /** Material image bytes; absent in a version 1 file, which carries none. */
   readonly assets?: readonly AssetBundleEntry[]
+  /** Raw conversation events; absent before version 5. */
+  readonly presence?: readonly PresenceDay[]
 }
 
 /** One image inside a backup file: the bytes travel with the file. */
@@ -330,6 +354,8 @@ export interface ImportReport {
   readonly todos: number
   readonly counters: number
   readonly assets: number
+  /** Raw conversation events carried by the file (version 5 and up). */
+  readonly presence: number
   /** Records dropped because `replace` cleared keys the file did not carry. */
   readonly removed: number
 }
@@ -356,6 +382,49 @@ export interface ClockView {
     readonly dayStartHour: number
     readonly defaultVocabTarget: { readonly new: number; readonly review: number }
     readonly defaultRunMinutes: number
+  }
+}
+
+/** One interval the time view draws: two instants, start before end. */
+export interface TimeInterval {
+  readonly startedAt: string
+  readonly endedAt: string
+}
+
+/** One row of the time view: a focus entry, a conversation, or a habit. */
+export interface TimeRow {
+  readonly id: string
+  /** Focus rows carry the entry's title; talk and record rows do not. */
+  readonly title?: string
+  readonly intervals: readonly TimeInterval[]
+  readonly seconds: number
+}
+
+/** One axis tick, labelled in the host's zone. */
+export interface TimeTick {
+  readonly at: string
+  readonly label: string
+}
+
+/** The one-day time view, as the host derives it. */
+export interface TimeView {
+  readonly date: string
+  readonly from: string
+  readonly to: string
+  readonly nightFrom: string
+  readonly ticks: readonly TimeTick[]
+  /** The host boundary's zone; absent means the browser's own zone. */
+  readonly timezone?: string
+  readonly focus: readonly TimeRow[]
+  /** One row per conversation plus the `patrol` row; derived from raw presence. */
+  readonly talk: readonly TimeRow[]
+  readonly records: readonly TimeRow[]
+  readonly totals: {
+    readonly focus: number
+    readonly talk: number
+    readonly records: number
+    /** The union of the three groups; overlapping time counts once. */
+    readonly covered: number
   }
 }
 

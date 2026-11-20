@@ -20,6 +20,8 @@ import { CHECK_HABITS, MEAL_SLOTS } from './habits.ts'
 import { mediaRecord, taskRecord, todoRecord } from './domain.ts'
 import { ApiError } from './api-error.ts'
 import { buildStats } from './stats.ts'
+import { buildTime } from './time.ts'
+import type { PresenceStore } from './presence.ts'
 import {
   base64Bytes,
   type HabitStore,
@@ -33,6 +35,8 @@ import { MAX_IMAGE_BYTES } from '../shared/route.ts'
 export interface RouteCtx {
   readonly store: HabitStore
   readonly backup: Backup
+  /** Raw conversation presence; the time view derives attention from it. */
+  readonly presence: PresenceStore
   readonly boundary: DayBoundary
   readonly config: Config
   readonly now: () => Date
@@ -326,6 +330,38 @@ export const handlers: Record<RouteName, RouteHandler> = {
       throw new ApiError(400, 'habit/range-too-large', 'a statistics range covers at most 400 days', { days: 400 })
     }
     return { ok: true, ...buildStats(ctx.store, from, to, ctx.boundary) }
+  },
+
+  async time(ctx, _body, query) {
+    const date = ctx.dateOf(query, ctx.today())
+    // The presence read waits for its own write chain, so a segment that just
+    // closed is visible here rather than one request later.
+    const presence = await ctx.presence.readDay(date)
+    return {
+      ok: true,
+      ...buildTime({
+        store: ctx.store,
+        date,
+        today: ctx.today(),
+        boundary: ctx.boundary,
+        presence,
+        now: ctx.now(),
+      }),
+    }
+  },
+
+  async presence(ctx, body) {
+    const raw = ctx.parse(z.object({
+      sessionId: z.string().min(1).max(200),
+      clientId: z.string().min(1).max(200),
+      connectionId: z.string().min(1).max(200),
+      state: z.enum(['in', 'beat', 'out', 'prompt']),
+    }), body, 'presence')
+    if (raw.state === 'prompt') await ctx.presence.prompt(raw.sessionId, raw.clientId, raw.connectionId)
+    else if (raw.state === 'in') await ctx.presence.in(raw.sessionId, raw.clientId, raw.connectionId)
+    else if (raw.state === 'beat') await ctx.presence.beat(raw.sessionId, raw.clientId, raw.connectionId)
+    else await ctx.presence.out(raw.sessionId, raw.clientId, raw.connectionId)
+    return { ok: true }
   },
 
   // --- counted checks ------------------------------------------------------

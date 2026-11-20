@@ -324,6 +324,46 @@ export const assetRecord = z.object({
 export type AssetRecord = z.infer<typeof assetRecord>
 
 /**
+ * One raw conversation-presence event.
+ *
+ * The stored shape is the **observation**, not the attention model: a client
+ * said it entered, beat, or left a conversation, or the user sent a prompt.
+ * The two-minute tail, the three-minute bridges, the focus deduction and the
+ * per-session/patrol split are derived on read — storing them would freeze a
+ * heuristic into history and make a threshold change impossible
+ * (docs/adr/0002-derived-state-not-stored.md).
+ *
+ * `state` is required for a `presence` event and absent for a `prompt`: a
+ * prompt is an instant, while presence is a transition. `id` is the host's
+ * random event id, so a retried client post cannot silently merge with another
+ * event; the read may still see duplicates, and pairs them by order.
+ */
+export const presenceEvent = z.object({
+  id: sessionId,
+  kind: z.enum(['presence', 'prompt']),
+  state: z.enum(['in', 'beat', 'out']).optional(),
+  sessionId: z.string().min(1),
+  clientId: z.string().min(1),
+  connectionId: z.string().min(1),
+  at: z.string(),
+}).refine(event => event.kind !== 'presence' || event.state !== undefined, {
+  message: 'a presence event needs a state',
+})
+
+/** Every raw presence event of one habit day. */
+export const presenceDay = z.object({
+  /** Copy of the key, so a document is self-describing. */
+  date: z.string(),
+  events: z.array(presenceEvent).default([]),
+})
+
+/** One raw presence event. */
+export type PresenceEvent = z.infer<typeof presenceEvent>
+
+/** One habit day's raw presence events. */
+export type PresenceDay = z.infer<typeof presenceDay>
+
+/**
  * The domain declaration: identity, layout and record schemas.
  *
  * `version: 2` adds the `assets` table plus `materials`/`focusSessions` on the
@@ -341,6 +381,12 @@ export type AssetRecord = z.infer<typeof assetRecord>
  * every day written by the newer one. The backup file carries the layout that
  * does need a version (see `BACKUP_VERSION`), because there the alternative to a
  * version is silently stripping a field.
+ *
+ * The `presence` table is additive in the same way and deliberately stays at
+ * version 2. An older build does not declare the table and therefore never
+ * reads or discards its documents; a newer build reads them. Bumping the domain
+ * version for a table nobody has to migrate would make the older build delete
+ * the newer days.
  */
 export const habitDomainSpec = defineDomain({
   name: 'habit',
@@ -354,6 +400,7 @@ export const habitDomainSpec = defineDomain({
     tasks: domainTable<string, TaskRecord>(taskRecord),
     todos: domainTable<string, TodoRecord>(todoRecord),
     assets: domainTable<string, AssetRecord>(assetRecord),
+    presence: domainTable<DayKey, PresenceDay>(presenceDay),
   },
 })
 

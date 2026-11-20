@@ -106,6 +106,7 @@ export function DataCard({ client, onImported }: DataCardProps): JSX.Element {
         media: done.media,
         tasks: done.tasks,
         todos: done.todos,
+        presence: done.presence,
       })
         + (done.assets === 0 ? '' : t('data.imported.assets', { count: done.assets }))
         + (done.removed === 0 ? '' : t('data.imported.removed', { count: done.removed })))
@@ -164,6 +165,7 @@ export function DataCard({ client, onImported }: DataCardProps): JSX.Element {
                 media: staged.media?.length ?? 0,
                 tasks: staged.tasks?.length ?? 0,
                 todos: staged.todos?.length ?? 0,
+                presence: (staged.presence ?? []).reduce((sum, day) => sum + day.events.length, 0),
               })}
             </span>
             <span className="pt-grow" />

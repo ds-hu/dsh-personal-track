@@ -11,8 +11,8 @@
  *   node tests/backup.test.ts
  */
 import { strict as assert } from 'node:assert'
-import { createChecker, createHarness, type Harness } from './support.ts'
-import { BACKUP_FORMAT, BACKUP_VERSION, BackupFormatError, readBackup } from '../src/host/backup.ts'
+import { createChecker, createHarness, memoryDomain, type Harness } from './support.ts'
+import { BACKUP_FORMAT, BACKUP_VERSION, BackupFormatError, createBackup, readBackup } from '../src/host/backup.ts'
 
 const checker = createChecker('backup: facts out, facts in')
 const { check, checkAsync, report } = checker
@@ -53,18 +53,18 @@ async function populate(api: Harness): Promise<void> {
 
 // --- the file's shape --------------------------------------------------------
 
-await checkAsync('the bundle carries identity, a version and the six fact tables', async () => {
+await checkAsync('the bundle carries identity, a version and the seven fact tables', async () => {
   const api = createHarness()
   await populate(api)
   const bundle = api.backup.exportAll('2026-09-16T21:00:00Z')
   assert.deepEqual(
     Object.keys(bundle).sort(),
-    ['assets', 'counters', 'days', 'exportedAt', 'format', 'media', 'tasks', 'todos', 'version'],
-    'no seventh table, and nothing derived alongside them',
+    ['assets', 'counters', 'days', 'exportedAt', 'format', 'media', 'presence', 'tasks', 'todos', 'version'],
+    'no eighth table, and nothing derived alongside them',
   )
   assert.equal(bundle.format, BACKUP_FORMAT)
   assert.equal(bundle.version, BACKUP_VERSION)
-  assert.equal(bundle.version, 4, 'the left column’s todos are why the file layout moved to 4')
+  assert.equal(bundle.version, 5, 'raw presence events are why the file layout moved to 5')
   assert.equal(bundle.exportedAt, '2026-09-16T21:00:00Z')
 })
 
@@ -236,7 +236,7 @@ await checkAsync('merge overwrites the keys the file carries and keeps the rest'
   const api = createHarness()
   await populate(api)
   const report0 = await api.backup.importAll(smallBundle(), 'merge')
-  assert.deepEqual(report0, { mode: 'merge', days: 1, media: 0, tasks: 0, todos: 0, counters: 1, assets: 0, removed: 0 })
+  assert.deepEqual(report0, { mode: 'merge', days: 1, media: 0, tasks: 0, todos: 0, counters: 1, assets: 0, presence: 0, removed: 0 })
 
   const after = api.backup.exportAll('x')
   assert.equal(after.counters.laundry!.pending, 7, 'the counter was overwritten')
@@ -307,6 +307,44 @@ await checkAsync('an imported target snapshot is honoured rather than inherited'
   await restored.backup.importAll(bundle, 'replace')
   assert.deepEqual(restored.store.resolveTarget(DATE), { new: 10, review: 5 }, 'the snapshot travelled')
   assert.deepEqual(restored.store.resolveTarget(NEXT), { new: 10, review: 5 }, 'and carries forward')
+})
+
+await checkAsync('raw presence events travel and are counted by event, not by document', async () => {
+  const domain = memoryDomain()
+  await domain.table('presence').put(DATE, {
+    date: DATE,
+    events: [
+      { id: 'e1', kind: 'presence', state: 'in', sessionId: 's1', clientId: 'c1', connectionId: 'k1', at: '2026-09-16T09:00:00Z' },
+      { id: 'e2', kind: 'prompt', sessionId: 's1', clientId: 'c1', connectionId: 'k1', at: '2026-09-16T09:01:00Z' },
+      { id: 'e3', kind: 'presence', state: 'out', sessionId: 's1', clientId: 'c1', connectionId: 'k1', at: '2026-09-16T09:05:00Z' },
+    ],
+  })
+  const source = createBackup(domain)
+  const bundle = source.exportAll('x')
+  assert.equal(bundle.presence.length, 1, 'one document per habit day')
+  assert.equal(bundle.presence[0]?.events.length, 3, 'all three raw events travel')
+
+  const restored = createBackup(memoryDomain())
+  const report = await restored.importAll(bundle, 'replace')
+  assert.equal(report.presence, 3, 'the report counts raw events, not documents')
+  assert.deepEqual(restored.exportAll('x').presence, bundle.presence)
+})
+
+await checkAsync('a version 4 file without presence imports, and merge keeps existing observations', async () => {
+  const domain = memoryDomain()
+  await domain.table('presence').put(DATE, {
+    date: DATE,
+    events: [
+      { id: 'e1', kind: 'prompt', sessionId: 's1', clientId: 'c1', connectionId: 'k1', at: '2026-09-16T09:01:00Z' },
+    ],
+  })
+  const source = createBackup(domain)
+  const legacy = { ...source.exportAll('x'), version: 4 } as Record<string, unknown>
+  delete legacy.presence
+
+  const report = await source.importAll(legacy, 'merge')
+  assert.equal(report.presence, 0, 'a version 4 file observed no presence')
+  assert.equal(source.exportAll('x').presence.length, 1, 'merge keeps the existing observations')
 })
 
 report()

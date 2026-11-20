@@ -18,6 +18,7 @@ import type { Config, DayBoundary } from './config.ts'
 import { habitDayKey, instantForHabitDay, type DayKey } from '../shared/habit-day.ts'
 import { BACKUP_BODY_LIMIT, ASSET_BODY_LIMIT, MATERIAL_BODY_LIMIT, handlers, type BinaryResult, type RouteCtx, type StateAnswer } from './routes.ts'
 import type { HabitStore } from './store.ts'
+import type { PresenceStore } from './presence.ts'
 import { API_PREFIX, routes, type RouteName } from '../shared/route.ts'
 
 export { API_PREFIX } from '../shared/route.ts'
@@ -52,6 +53,8 @@ export type HabitHandler = (req: HabitRequest, res: HabitResponse) => Promise<vo
 export interface ApiDeps {
   readonly store: HabitStore
   readonly backup: Backup
+  /** Raw conversation presence, shared by the time view and the tracker route. */
+  readonly presence: PresenceStore
   readonly boundary: DayBoundary
   readonly config: Config
   readonly now: () => Date
@@ -200,6 +203,7 @@ export function createApiHandler(deps: ApiDeps): HabitHandler {
   const ctx: RouteCtx = {
     store,
     backup: deps.backup,
+    presence: deps.presence,
     boundary: deps.boundary,
     config: deps.config,
     now: deps.now,

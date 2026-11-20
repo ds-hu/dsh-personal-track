@@ -83,6 +83,8 @@ const CALLS: readonly (readonly [RouteName, (client: ReturnType<typeof createHab
   ['patchTodo', client => client.patchTodo('todo1', { done: true })],
   ['removeTodo', client => client.removeTodo('todo1')],
   ['stats', client => client.stats('2026-09-01', '2026-09-16')],
+  ['time', client => client.time('2026-09-16')],
+  ['presence', client => client.presence('s1', 'c1', 'k1', 'in')],
   ['exportBackup', client => client.exportAll()],
   ['importBackup', client => client.importAll('merge', { format: 'x' })],
   // materials and focus mode
@@ -143,6 +145,21 @@ await checkAsync('a state slice with no todos is a stale host, not a crash', asy
     () => client.state('2026-09-16'),
     (cause: unknown) => (cause as { code?: string }).code === 'habit/stale-host',
     'a slice without the column’s list names the stale host half',
+  )
+})
+
+await checkAsync('a host without the time route is named stale, not as a missing record', async () => {
+  // The time route is newer than a running host's route table. A 404 there is
+  // the host half being old, and the panel must say "restart dsh" rather than
+  // “no such record”, which would send the reader looking for a record.
+  const { client } = recording(
+    { error: { code: 'habit/not-found', message: 'no such route' } },
+    { status: 404 },
+  )
+  await assert.rejects(
+    () => client.time('2026-09-16'),
+    (cause: unknown) => (cause as { code?: string }).code === 'habit/stale-host',
+    'a missing /time route names the stale host half',
   )
 })
 

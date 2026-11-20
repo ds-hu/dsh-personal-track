@@ -71,6 +71,15 @@ export const routes = {
   exportBackup: { method: 'GET', request: '/backup' },
   importBackup: { method: 'POST', request: '/backup' },
   stats: { method: 'GET', request: '/stats' },
+  time: { method: 'GET', request: '/time' },
+  /**
+   * A client's raw conversation presence: `in`/`beat`/`out`/`prompt`.
+   *
+   * The host stamps every event; the body carries no instant, so a device clock
+   * that is minutes off cannot move the chart. The response is deliberately
+   * empty: the presence is an observation, not a read.
+   */
+  presence: { method: 'POST', request: '/presence' },
   addMedia: { method: 'POST', request: '/media' },
   patchMedia: { method: 'PATCH', request: '/media' },
   removeMedia: { method: 'DELETE', request: '/media' },

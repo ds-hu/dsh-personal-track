@@ -1,9 +1,11 @@
 /**
  * personal-track — browser half.
  *
- * Registers one surface: the `习惯看板` panel in the main area (with its
- * sidebar entry), which holds both the day's board and the statistics view,
- * plus focus mode over either of them.
+ * Registers two surfaces: the `习惯看板` panel in the main area (with its
+ * sidebar entry), which holds the day's board, the statistics view and the time
+ * view, plus focus mode over the board; and an invisible 1×1 presence tracker in
+ * each conversation's composer dock, which feeds the time view's conversation
+ * band.
  *
  * The right-sidebar tab this plugin used to own is gone by decision: the board
  * and the statistics were two halves of one question — "how is today going, and
@@ -21,6 +23,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { createHabitClient } from './api.ts'
 import { BoardIcon } from './board/BoardBody.tsx'
+import { PresenceTracker } from './board/PresenceTracker.tsx'
 import { TrackPanel } from './board/TrackPanel.tsx'
 import { DICTIONARIES } from './copy/index.tsx'
 import { COPY_NAMESPACE } from './locale.ts'
@@ -60,4 +63,12 @@ export function apply(ctx: Context): void {
     { name: 'sidebar.panellist', id: PANEL_ID, order: 20, label: () => copy('panel.title') },
     BoardIcon,
   )), 'personal-track: sidebar entry')
+
+  // The conversation tracker rides in the composer's dock as a 1×1 marker: it
+  // observes whether a conversation is really on screen, and reports raw
+  // presence so the time view can derive the conversation band.
+  ctx.effect(() => ctx.slots.inject('conversation.input.dock', () => ctx.slots.register(
+    { name: 'conversation.input.dock', id: 'personal-track-presence', inject: () => ({ client }) },
+    PresenceTracker,
+  )), 'personal-track: conversation presence')
 }

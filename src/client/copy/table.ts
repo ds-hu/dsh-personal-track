@@ -36,6 +36,7 @@ export const COPY = {
   'panel.title': { zh: '习惯看板', en: 'Habit board' },
   'panel.view.board': { zh: '打卡', en: 'Check-in' },
   'panel.view.stats': { zh: '统计', en: 'Stats' },
+  'panel.view.time': { zh: '时间', en: 'Time' },
 
   // ---- the board's groups ---------------------------------------------
   'group.daily': { zh: '日常', en: 'Daily' },
@@ -104,7 +105,7 @@ export const COPY = {
   'form.save': { zh: '保存', en: 'Save' },
   'form.cancel': { zh: '取消', en: 'Cancel' },
   'form.optional': { zh: '可留空', en: 'optional' },
-  'field.time': { zh: '时间', en: 'Time' },
+  'field.time': { zh: '结束时间', en: 'End time' },
   'field.price': { zh: '价格', en: 'Price' },
   'field.required': { zh: '{label}不能为空', en: '{label} is required' },
   'field.number': { zh: '{label}必须是数字', en: '{label} must be a number' },
@@ -349,6 +350,25 @@ export const COPY = {
   'stats.free.kcalMeasured': { zh: '{kcal} kcal（{count} 次有记录）', en: '{kcal} kcal ({count} measured)' },
   'stats.meals.breakfastValue': { zh: '{days} 天（{percent}%）', en: '{days} days ({percent}%)' },
 
+  // ---- the one-day time view -------------------------------------------
+  'time.range': { zh: '{from} → 次日 {to}', en: '{from} → next day {to}' },
+  'time.now': { zh: '现在 {time}', en: 'Now {time}' },
+  'time.focus': { zh: '专注', en: 'Focus' },
+  'time.talk': { zh: '对话', en: 'Talk' },
+  'time.patrol': { zh: '巡逻', en: 'Patrol' },
+  'time.tracked': { zh: '有记录', en: 'Tracked' },
+  'time.records': { zh: '记录', en: 'Records' },
+  'time.detail': { zh: '详情', en: 'Detail' },
+  'time.overview': { zh: '全天总览', en: 'Whole day' },
+  'time.count.items': { zh: '{count} 项', en: '{count} items' },
+  'time.count.segments': { zh: '{count} 段', en: '{count} sessions' },
+  'time.talk.empty': { zh: '还没有对话活跃时间', en: 'No conversation time yet' },
+  'time.empty': { zh: '这一天还没有时间记录', en: 'Nothing timed on this day' },
+  'time.block.focus': { zh: '{title} · {start}–{end} · {duration}', en: '{title} · {start}–{end} · {duration}' },
+  'time.block.talk': { zh: '{start}–{end} · {duration}', en: '{start}–{end} · {duration}' },
+  'time.block.record': { zh: '{title} · {start}–{end} · {duration}', en: '{title} · {start}–{end} · {duration}' },
+  'time.block.merged': { zh: '{sources} · {start}–{end} · {duration}', en: '{sources} · {start}–{end} · {duration}' },
+
   // ---- the focus column ------------------------------------------------
   'focus.progress': { zh: '进度 {current}/{total}', en: '{current}/{total} done' },
   'focus.due.today': { zh: '截止于今天', en: 'due today' },
@@ -381,14 +401,14 @@ export const COPY = {
   'data.sweep': { zh: '清理未引用图片', en: 'Sweep unreferenced images' },
   'data.exported': { zh: '已导出 {days} 天记录', en: 'Exported {days} days' },
   'data.imported': {
-    zh: '导入完成：{days} 天、{media} 影视书籍、{tasks} 任务、{todos} 条待办',
-    en: 'Imported {days} days, {media} films and books, {tasks} tasks, {todos} todos',
+    zh: '导入完成：{days} 天、{media} 影视书籍、{tasks} 任务、{todos} 条待办、{presence} 个对话事件',
+    en: 'Imported {days} days, {media} films and books, {tasks} tasks, {todos} todos, {presence} conversation events',
   },
   'data.imported.assets': { zh: '、{count} 张图片', en: ', {count} images' },
   'data.imported.removed': { zh: '，清掉 {count} 条本地多余记录', en: ' ({count} extra local records removed)' },
   'data.staged': {
-    zh: '{days} 天、{media} 影视书籍、{tasks} 任务、{todos} 条待办',
-    en: '{days} days, {media} films and books, {tasks} tasks, {todos} todos',
+    zh: '{days} 天、{media} 影视书籍、{tasks} 任务、{todos} 条待办、{presence} 个对话事件',
+    en: '{days} days, {media} films and books, {tasks} tasks, {todos} todos, {presence} conversation events',
   },
   'data.merge': { zh: '合并', en: 'Merge' },
   'data.replace': { zh: '覆盖（清空现有）', en: 'Replace (clear what is there)' },
