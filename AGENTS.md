@@ -48,6 +48,11 @@ pnpm verify       # 先构建，再跑 verify-client（facade）+ verify-host（
 - 外部包的版本**与本机运行时不齐**：本仓库 devDeps 是 0.1.5 线，运行中的 `dsh` 是 0.2.2 线。
   所以 `src/client/locale.ts` 自己声明了用到的四个 locale 成员，而不是引入 `dsh-client-locale` 的
   `.d.ts`（那会连带 package-manifest 与 settings 两张类型网）。要动这段，先确认运行时那侧的形状。
+- **会话/对话的 slot 与 standard props 也只存在于运行时**：`conversation.input.dock`、`useSessions`、
+  `useSession`、`useInput` 在 0.1.5 的 devDeps 里都没有。新增这类插槽时，照运行时的 `.d.ts` 在
+  `src/client/slots.ts` 里写窄 `SlotMap` / `GlobalStandardProps` / `SessionStandardProps`
+  （module augmentation），不要加 devDep。`useSessions`/`useSession`/`useInput` 是 **standard props，
+  不是 inject face**；`verify-client` 只证明注册，证明不了挂载——挂载要在真实 GUI 里看。
 
 ## 文案（唯一来源）
 
@@ -74,6 +79,14 @@ pnpm verify       # 先构建，再跑 verify-client（facade）+ verify-host（
 - **习惯日算术只有一份**（`src/shared/habit-day.ts`）：任何界面都不得从本地日历造日期。
   夜段里那是"专注模式显示今天、看板显示 3 天后"的来源（ADR 0005）。
 - **打卡上限在 store 的原子改写内**：先读后写会让两个并发打卡都读到 1、落下第三次。
+- **`ctx.effect` 的 disposer 并发执行，不是按注册顺序**：需要「先 flush、再 `domain.close()`」时，写成一个
+  cleanup 并 `return` 那个 promise（`presence.close()` 后接 `domain.close()`）。分成两个 effect 会让
+  `domain.close()` 先置 `disposing`，flush 的 `put` 被 `closed` 拒绝，live 前缀静默丢掉。
+- **原始 presence 的读侧两条不变量**：同一 key 的第二个 `in` 是重启恢复（宿主只在没有 live 时写 `in`），
+  要在最后观测点关旧段、再开新段；跨会话缺口的比较点取「目前最远 end」，不是相邻段的 end——否则重叠
+  设备会把真正的巡逻缺口吞掉。
+- **能 additive 就 additive**：`presence` 表没有 bump domain version，因为旧构建不声明它、也不会丢弃它；
+  backup 文件则必须 bump（`BACKUP_VERSION` 6），因为旧 reader 会在下一次导出时静默 strip 掉新数组。
 
 ## UI 与样式
 
@@ -99,6 +112,9 @@ pnpm verify       # 先构建，再跑 verify-client（facade）+ verify-host（
   `ApiDeps.now` / `Config.now` 是同一条时间缝线：需要"今天"的断言传固定时刻，不要读墙钟。
 - 一次改动做完的最低门槛：`pnpm test` 全绿 + 三套 `tsc` 干净 + `build` / `verify-client` /
   `verify-host` 通过 + `git diff --check` 干净。
+- **没有独立的 `pnpm run verify-client`**：client 与 host 校验都在 `pnpm verify` 里。
+- **断言不能在错误的理由下通过**：`/time` 的 `talk.length === 0` 只应在「此刻还没发 presence」时成立，
+  非空验证要放在 presence 块；秒/毫秒要带单位（`secondsOf` 返回秒，别写返回毫秒的 `minutes()`）。
 
 ## 提交与发布
 
