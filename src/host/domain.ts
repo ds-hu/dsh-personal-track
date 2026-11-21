@@ -175,6 +175,80 @@ export const focusSession = z.object({
 export type FocusSession = z.infer<typeof focusSession>
 
 /**
+ * One closed interval on a habit day's clock — **the durable unit of time**.
+ *
+ * A 专注会话 and a 对话停留 are the same thing seen through two doors: someone
+ * was busy from one instant to another, and *what* they were busy with is a
+ * label on the row. Storing them in two different places is what produced two
+ * unrelated problems — a focus session deleted with its entry, and a day of raw
+ * presence events that only ever grows.
+ *
+ * So both end up here, on the day they started in, once they are **closed**:
+ *
+ * - a `focus` row is written when its entry is deleted (the entry is
+ *   hard-deleted; the hour it was focused on is not the entry's to take), and
+ *   carries the title the entry had at that moment, because the entry no longer
+ *   exists to be asked;
+ * - a `talk` row is written when a day of raw presence gets older than the raw
+ *   window — it is what `readDay` would have folded those events into anyway,
+ *   so the attention model still runs at read time on the same observations;
+ * - a `prompt` row is an instant, not an interval: the two-minute tail is
+ *   derived from it on read.
+ *
+ * `id` is deterministic — the focus session's own id, or `talk:<session>:<start>`
+ * / `prompt:<session>:<at>` — so folding a day twice cannot double it, and a
+ * delete interrupted between writing here and deleting the record is repaired
+ * by de-duplicating ids on read.
+ */
+export const timeItem = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('focus'),
+    id: sessionId,
+    /** The deleted entry this session was spent on. */
+    entry: sessionId,
+    entryKind: z.enum(['task', 'media', 'todo']),
+    /** The title that entry had when it went. */
+    title: z.string().min(1),
+    startedAt: z.string(),
+    endedAt: z.string(),
+  }),
+  z.object({
+    kind: z.literal('talk'),
+    id: sessionId,
+    session: z.string().min(1),
+    startedAt: z.string(),
+    endedAt: z.string(),
+  }),
+  z.object({
+    kind: z.literal('prompt'),
+    id: sessionId,
+    session: z.string().min(1),
+    at: z.string(),
+  }),
+])
+
+/** One durable time fact. */
+export type TimeItem = z.infer<typeof timeItem>
+
+/**
+ * One habit day's ledger: the closed intervals that belong to it.
+ *
+ * Only intervals whose subject is gone (a deleted entry) or whose raw detail has
+ * aged out (presence) live here; a live entry still carries its own sessions,
+ * because the board asks "how long did I spend on this one" far more often than
+ * "what happened on that day", and reading that off a day ledger would mean
+ * scanning every day for every view.
+ */
+export const timeDay = z.object({
+  /** Copy of the key, so a document describes itself. */
+  date: z.string(),
+  items: z.array(timeItem).default([]),
+})
+
+/** One habit day's ledger. */
+export type TimeDay = z.infer<typeof timeDay>
+
+/**
  * A Markdown text block among a registry entry's materials.
  *
  * The text lives here rather than in `notes` because materials are an ordered
@@ -387,6 +461,11 @@ export type PresenceDay = z.infer<typeof presenceDay>
  * reads or discards its documents; a newer build reads them. Bumping the domain
  * version for a table nobody has to migrate would make the older build delete
  * the newer days.
+ *
+ * `time` is additive for the same reason: it is a new table, every build that
+ * predates it simply never looks in it, and nothing already stored changes
+ * shape. The *backup* file does need a version, because an older reader would
+ * export a v6 file without the array and silently drop the time it holds.
  */
 export const habitDomainSpec = defineDomain({
   name: 'habit',
@@ -399,6 +478,7 @@ export const habitDomainSpec = defineDomain({
     media: domainTable<string, MediaRecord>(mediaRecord),
     tasks: domainTable<string, TaskRecord>(taskRecord),
     todos: domainTable<string, TodoRecord>(todoRecord),
+    time: domainTable<DayKey, TimeDay>(timeDay),
     assets: domainTable<string, AssetRecord>(assetRecord),
     presence: domainTable<DayKey, PresenceDay>(presenceDay),
   },

@@ -39,14 +39,24 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const now = clockOf(config)
   const presence = createPresence({ domain, boundary, now })
 
+  // Days older than the raw window are folded into the time ledger before the
+  // first request is served: a host that was down for a week would otherwise
+  // keep a week of raw events until the next boundary. `void` on purpose — a
+  // failure here must not stop the plugin from serving, and the checkpoint below
+  // retries it.
+  void presence.maintain().catch(cause => console.error('personal-track: presence compaction failed', cause))
+
   // A sweep every twenty seconds closes silent clients at their lastSeen; a
-  // checkpoint every five minutes bounds what a crash can lose. Both are
-  // `unref`ed so a test process is not kept alive by the plugin's timers.
+  // checkpoint every five minutes bounds what a crash can lose, and folds the
+  // days that just left the raw window. Both are `unref`ed so a test process is
+  // not kept alive by the plugin's timers.
   const sweep = setInterval(() => {
     void presence.sweep().catch(cause => console.error('personal-track: presence sweep failed', cause))
   }, 20_000)
   const checkpoint = setInterval(() => {
-    void presence.checkpoint().catch(cause => console.error('personal-track: presence checkpoint failed', cause))
+    void presence.checkpoint()
+      .then(() => presence.maintain())
+      .catch(cause => console.error('personal-track: presence checkpoint failed', cause))
   }, PRESENCE_CHECKPOINT_MS)
   sweep.unref()
   checkpoint.unref()

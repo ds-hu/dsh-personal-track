@@ -109,14 +109,17 @@ See the **习惯清单** entry in [CONTEXT.md](./CONTEXT.md) and [AGENTS.md](./A
 
 `~/.dsh/storages/habit/`, human-readable JSON, one record per file:
 `days/<date>.json` (one habit day), `counters/laundry.json` (the stock),
-`media/<id>.json`, `tasks/<id>.json` (registry entries), `assets/<id>.json`
-(material image bytes). **An empty day produces no document**, and only facts are
+`media/<id>.json`, `tasks/<id>.json`, `todos/<id>.json` (registry entries),
+`assets/<id>.json` (material image bytes), `time/<date>.json` (the **time ledger**:
+closed focus sessions and conversation visits), `presence/<date>.json` (raw
+conversation presence, three days only).
+**An empty day produces no document**, and only facts are
 stored — cell counts, ratios, streaks, overdue marks and focus totals are all derived
 on read.
 
 **Backup**: "Export" in the statistics view writes `personal-track-<date>.json`
-(format `personal-track/backup`, version 3) holding facts only, so the file cannot
-contradict the data it came from. v1 and v2 files still import; the other direction does
+(format `personal-track/backup`, version 6) holding facts only, so the file cannot
+contradict the data it came from. v1–v5 files still import; the other direction does
 not (an older build rejects a version it does not know rather than dropping fields).
 Picking a file only parses it and shows the counts — nothing is written until you choose
 **merge** (same keys overwrite) or **replace** (also deletes local records the file omits).

@@ -135,7 +135,6 @@ await checkAsync('a day derives focus, records and the union total from the stor
   const view = buildTime({
     store,
     date: DATE,
-    today: DATE,
     boundary,
     presence: { segments: [], prompts: [] },
     now: new Date('2026-11-19T23:00:00+08:00'),
@@ -173,6 +172,29 @@ await checkAsync('a day derives focus, records and the union total from the stor
   // removes both overlaps, while the group totals keep them.
   assert.equal(view.totals.covered, 19_065)
   assert.ok(view.totals.covered < view.totals.focus + view.totals.records)
+})
+
+await checkAsync('deleting the entry keeps its focus row, and the conversation it hid stays hidden', async () => {
+  const { store, boundary } = await fixture()
+  // One long visit 08:50–10:40 that runs across both of the entry's sessions.
+  const presence = {
+    segments: [{ sessionId: 'c1', startedAt: '2026-11-19T08:50:00+08:00', endedAt: '2026-11-19T10:40:00+08:00' }],
+    prompts: [],
+  }
+  const now = new Date('2026-11-19T23:00:00+08:00')
+  const before = buildTime({ store, date: DATE, boundary, presence, now })
+  assert.deepEqual(before.focus.map(row => row.id), ['media:m1'])
+  assert.equal(before.totals.talk, 35 * 60, 'the visit minus the two focused stretches')
+
+  await store.deleteMedia('m1')
+  const after = buildTime({ store, date: DATE, boundary, presence, now })
+  assert.deepEqual(
+    after.focus.map(row => [row.id, row.title, row.seconds]),
+    [['media:m1', '周报', (45 + 30) * 60]],
+    'the row is still there, under the title the entry had',
+  )
+  assert.equal(after.totals.focus, before.totals.focus, 'and the total did not move')
+  assert.equal(after.totals.talk, before.totals.talk, 'nor did the conversation that focused time covered')
 })
 
 report()

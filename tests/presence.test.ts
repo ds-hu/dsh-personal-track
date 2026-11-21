@@ -15,6 +15,8 @@ import { boundaryOf } from '../src/host/config.ts'
 import { buildAttention } from '../src/host/attention.ts'
 import { createPresence } from '../src/host/presence.ts'
 import { buildTime } from '../src/host/time.ts'
+import type { PresenceDay } from '../src/host/domain.ts'
+import { habitDayKey, shiftDayKey } from '../src/shared/habit-day.ts'
 import { unionSeconds } from '../src/shared/time-union.ts'
 import { createChecker, createHarness, memoryDomain } from './support.ts'
 
@@ -252,7 +254,6 @@ await checkAsync('the time view names each conversation and keeps the patrol as 
   const view = buildTime({
     store: api.store,
     date: '2026-09-16',
-    today: '2026-09-16',
     boundary: boundaryOf(api.config),
     presence: {
       segments: [
@@ -268,6 +269,104 @@ await checkAsync('the time view names each conversation and keeps the patrol as 
   assert.equal(view.totals.talk, secs(20))
   assert.equal(view.talk.find(row => row.id === 'patrol')?.seconds, secs(2))
   assert.equal(view.totals.covered, secs(20), 'no records, so the union is the talk total')
+})
+
+// --- the raw window: three days, then the ledger -----------------------------
+
+/** One raw `in`/`out` pair on `day`, at `clock` local time. */
+function rawDayOf(day: string, clock: string): PresenceDay {
+  const at = (time: string): string => `${day}T${time}+08:00`
+  return {
+    date: day,
+    events: [
+      { id: `${day}-in`, kind: 'presence', state: 'in', sessionId: 's1', clientId: 'c1', connectionId: 'k1', at: at(clock) },
+      { id: `${day}-out`, kind: 'presence', state: 'out', sessionId: 's1', clientId: 'c1', connectionId: 'k1', at: at('09:10') },
+    ],
+  }
+}
+
+await checkAsync('the window keeps three days of raw events and folds the fourth', async () => {
+  const domain = memoryDomain()
+  const today = habitDayKey(new Date(AT('09:00')), boundary)
+  const presence = createPresence({ domain, boundary, now: () => new Date(AT('12:00')) })
+  for (const daysAgo of [0, 1, 2, 3]) {
+    const day = shiftDayKey(today, -daysAgo)
+    await domain.table('presence').put(day, rawDayOf(day, '09:00'))
+  }
+
+  await presence.maintain()
+
+  assert.deepEqual(
+    [...domain.table('presence').keys()].sort(),
+    [today, shiftDayKey(today, -1), shiftDayKey(today, -2)].sort(),
+    'today and the two before it keep their raw events',
+  )
+  const folded = domain.table('time').get(shiftDayKey(today, -3))
+  assert.deepEqual(folded?.items.map(item => item.kind), ['talk'], 'the fourth day became a visit')
+})
+
+await checkAsync('a folded day reads back the same visits and prompts', async () => {
+  const domain = memoryDomain()
+  const old = shiftDayKey(habitDayKey(new Date(AT('09:00')), boundary), -4)
+  await domain.table('presence').put(old, {
+    date: old,
+    events: [
+      ...rawDayOf(old, '09:00').events,
+      { id: `${old}-prompt`, kind: 'prompt', sessionId: 's1', clientId: 'c1', connectionId: 'k1', at: `${old}T09:05+08:00` },
+    ],
+  })
+  const presence = createPresence({ domain, boundary, now: () => new Date(AT('12:00')) })
+  const before = await presence.readDay(old)
+  assert.equal(before.segments.length, 1, 'the raw pair folds into one visit')
+
+  await presence.maintain()
+  assert.equal(domain.table('presence').get(old), undefined, 'the raw events are gone')
+
+  const after = await presence.readDay(old)
+  assert.deepEqual(after.segments, before.segments, 'the same visit, read from the ledger')
+  assert.deepEqual(after.prompts, before.prompts, 'and the same prompt')
+  // The attention model consumes these two lists and nothing else, so a day
+  // that reads back identical draws an identical band.
+  const band = (read: typeof before): number => buildAttention({
+    segments: read.segments, prompts: read.prompts, focus: [], from: `${old}T04:00+08:00`, to: `${shiftDayKey(old, 1)}T04:00+08:00`,
+  }).totalSeconds
+  assert.equal(band(after), band(before))
+
+  await presence.maintain()
+  assert.equal(domain.table('time').get(old)?.items.length, 2, 'a second pass adds nothing')
+})
+
+await checkAsync('a day a still-running visit started on is never folded away', async () => {
+  const domain = memoryDomain()
+  const start = new Date(AT('09:00'))
+  let clock = start
+  const presence = createPresence({ domain, boundary, now: () => clock })
+  await presence.in('s1', 'c1', 'k1')
+  const day = habitDayKey(start, boundary)
+
+  // Three more days of one unbroken visit — a kiosk tab, say. Its beats land in
+  // the document of the day the session *started* in, which by now is older
+  // than the raw window and therefore a compaction candidate.
+  for (const offset of [1, 2, 3]) {
+    clock = new Date(start.getTime() + offset * 86_400_000)
+    await presence.beat('s1', 'c1', 'k1')
+    await presence.checkpoint()
+  }
+
+  await presence.maintain()
+  assert.ok(domain.table('presence').get(day), 'the anchor stays while the visit is running')
+  assert.equal(domain.table('time').get(day), undefined, 'and the day is not folded yet')
+
+  // It ends three hours after that last beat: now the day can fold, and the row
+  // has to cover the whole visit, not the prefix compaction happened to see.
+  clock = new Date(start.getTime() + 3 * 86_400_000 + 3 * 3_600_000)
+  await presence.out('s1', 'c1', 'k1')
+  await presence.maintain()
+  const read = await presence.readDay(day)
+  assert.equal(read.segments.length, 1)
+  assert.equal(Date.parse(read.segments[0]!.startedAt), start.getTime())
+  assert.equal(Date.parse(read.segments[0]!.endedAt), clock.getTime(), 'the tail after the window is not lost')
+  assert.equal(domain.table('presence').get(day), undefined, 'and the raw events are gone now')
 })
 
 report()

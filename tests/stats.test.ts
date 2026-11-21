@@ -351,6 +351,23 @@ await checkAsync("a todo's focus time is in the total, beside a task's and a fil
   )
 })
 
+await checkAsync("a deleted entry's focus time stays in the total", async () => {
+  const api = createHarness()
+  const closed = { id: 'fd', startedAt: `${WED}T09:00:00`, endedAt: `${WED}T10:00:00` }
+  await api.store.putTodo({
+    id: 'd1', title: '买挂钩', done: false, createdAt: 'c', focusSessions: [closed],
+  } as never)
+  assert.deepEqual(buildStats(api.store, WED, WED, boundaryOf(api.config)).focus, { seconds: 3600, sessions: 1 })
+
+  await api.store.deleteTodo('d1')
+  assert.deepEqual(api.store.view(WED, WED).todos, [], 'the list the column shows is empty again')
+  assert.deepEqual(
+    buildStats(api.store, WED, WED, boundaryOf(api.config)).focus,
+    { seconds: 3600, sessions: 1 },
+    'but the hour it was focused on is still the user’s, not the entry’s',
+  )
+})
+
 await checkAsync('a run from a day outside the range is not counted', async () => {
   const api = createHarness()
   await api.store.mutateDay(MON, day => ({ ...day, run: { at: 'x', minutes: 30, distanceKm: 5, avgHr: 150 } }))

@@ -53,18 +53,18 @@ async function populate(api: Harness): Promise<void> {
 
 // --- the file's shape --------------------------------------------------------
 
-await checkAsync('the bundle carries identity, a version and the seven fact tables', async () => {
+await checkAsync('the bundle carries identity, a version and the eight fact tables', async () => {
   const api = createHarness()
   await populate(api)
   const bundle = api.backup.exportAll('2026-09-16T21:00:00Z')
   assert.deepEqual(
     Object.keys(bundle).sort(),
-    ['assets', 'counters', 'days', 'exportedAt', 'format', 'media', 'presence', 'tasks', 'todos', 'version'],
-    'no eighth table, and nothing derived alongside them',
+    ['assets', 'counters', 'days', 'exportedAt', 'format', 'media', 'presence', 'tasks', 'time', 'todos', 'version'],
+    'no ninth table, and nothing derived alongside them',
   )
   assert.equal(bundle.format, BACKUP_FORMAT)
   assert.equal(bundle.version, BACKUP_VERSION)
-  assert.equal(bundle.version, 5, 'raw presence events are why the file layout moved to 5')
+  assert.equal(bundle.version, 6, 'the time ledger is why the file layout moved to 6')
   assert.equal(bundle.exportedAt, '2026-09-16T21:00:00Z')
 })
 
@@ -236,7 +236,7 @@ await checkAsync('merge overwrites the keys the file carries and keeps the rest'
   const api = createHarness()
   await populate(api)
   const report0 = await api.backup.importAll(smallBundle(), 'merge')
-  assert.deepEqual(report0, { mode: 'merge', days: 1, media: 0, tasks: 0, todos: 0, counters: 1, assets: 0, presence: 0, removed: 0 })
+  assert.deepEqual(report0, { mode: 'merge', days: 1, media: 0, tasks: 0, todos: 0, counters: 1, assets: 0, presence: 0, time: 0, removed: 0 })
 
   const after = api.backup.exportAll('x')
   assert.equal(after.counters.laundry!.pending, 7, 'the counter was overwritten')
@@ -345,6 +345,40 @@ await checkAsync('a version 4 file without presence imports, and merge keeps exi
   const report = await source.importAll(legacy, 'merge')
   assert.equal(report.presence, 0, 'a version 4 file observed no presence')
   assert.equal(source.exportAll('x').presence.length, 1, 'merge keeps the existing observations')
+})
+
+await checkAsync("a deleted entry's focus sessions travel, and come back as time", async () => {
+  const api = createHarness({ at: '2026-09-16T12:00:00Z' })
+  await api.store.putTodo({
+    id: 'd1',
+    title: '买挂钩',
+    done: false,
+    createdAt: '2026-09-16T09:00:00Z',
+    focusSessions: [{ id: 'f1', startedAt: '2026-09-16T10:00:00Z', endedAt: '2026-09-16T10:30:00Z' }],
+  } as never)
+  await api.store.deleteTodo('d1')
+
+  const bundle = api.backup.exportAll('x')
+  assert.deepEqual(
+    bundle.time.flatMap(day => day.items.map(item => (item.kind === 'focus' ? [item.kind, item.title] : [item.kind]))),
+    [['focus', '买挂钩']],
+    'the entry is gone but the time it was spent on is not',
+  )
+
+  const restored = createHarness()
+  const report = await restored.backup.importAll(bundle, 'replace')
+  assert.equal(report.time, 1, 'the report counts the intervals, not the documents')
+  assert.deepEqual(restored.backup.exportAll('x').time, bundle.time, 'the file is a fixed point again')
+  assert.deepEqual(restored.store.focusSources().map(source => [source.title, source.sessions.length]), [['买挂钩', 1]])
+
+  // A file from before the ledger carries no array at all: that means "nothing
+  // was kept", not "keep whatever this root already has".
+  const legacy = { ...bundle, version: 5 } as Record<string, unknown>
+  delete legacy.time
+  const anyRoot = createHarness()
+  const old = await anyRoot.backup.importAll(legacy, 'replace')
+  assert.equal(old.time, 0, 'a version 5 file carries no ledger')
+  assert.deepEqual(anyRoot.backup.exportAll('x').time, [])
 })
 
 report()

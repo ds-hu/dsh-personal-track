@@ -5,8 +5,11 @@
  * beat or left, or the user sent a prompt. Every event is stamped by the host's
  * clock, so a skewed browser cannot inflate or deflate a minute. The two-minute
  * tail, the three-minute bridges, the focus subtraction and the patrol row are
- * derived on read by `attention.ts`; this file only keeps the raw events and the
- * live sessions that have not been checkpointed yet.
+ * derived on read by `attention.ts`; this file keeps the raw events for
+ * {@link PRESENCE_RAW_DAYS} days and the live sessions that have not been
+ * checkpointed yet. Older days are folded into the time ledger — the same
+ * intervals `readDay` would have produced — so the row the time view draws does
+ * not change, only the detail behind it goes away.
  *
  * Three rules make the derived numbers survive crashes and reloads without
  * inventing time:
@@ -25,15 +28,27 @@
  * part. This is the same start-day rule the focus sessions follow.
  */
 import { randomUUID } from 'node:crypto'
-import { habitDayKey, type DayBoundary, type DayKey } from '../shared/habit-day.ts'
-import type { HabitDomain, PresenceDay, PresenceEvent } from './domain.ts'
+import { habitDayKey, shiftDayKey, type DayBoundary, type DayKey } from '../shared/habit-day.ts'
+import type { HabitDomain, PresenceDay, PresenceEvent, TimeItem } from './domain.ts'
 import type { AttentionPrompt, AttentionSegment } from './attention.ts'
+import { createLedger } from './ledger.ts'
 
 /** A silent client is considered gone after this long without a beat. */
 export const PRESENCE_IDLE_MS = 60_000
 
 /** How often the active prefix is written down, bounding a crash's loss. */
 export const PRESENCE_CHECKPOINT_MS = 5 * 60_000
+
+/**
+ * How many habit days keep their **raw** events.
+ *
+ * Three: today, yesterday, and one more. Older than that, the day is folded into
+ * the time ledger — the same closed intervals the attention model would have
+ * derived anyway, so nothing the time view draws changes; what goes away is the
+ * in/out/beat detail that only ever grew (a real day is ~200 KB of it, four
+ * fifths of which never survives the three-minute bridge as a separate visit).
+ */
+export const PRESENCE_RAW_DAYS = 3
 
 /** The raw observations of one habit day, after the store's live prefixes. */
 export interface PresenceRead {
@@ -55,6 +70,15 @@ export interface PresenceStore {
   sweep(): Promise<void>
   /** Write the observed prefix of every live session. */
   checkpoint(): Promise<void>
+  /**
+   * Fold the days older than {@link PRESENCE_RAW_DAYS} into the time ledger.
+   *
+   * Idempotent, and cheap when there is nothing to do — the raw table only ever
+   * holds the window, because a compacted day's events are deleted in the same
+   * pass. Epoch milliseconds are not involved: "older" is a habit day, the same
+   * unit everything else here counts in.
+   */
+  maintain(): Promise<void>
   /** The raw segments and prompts of one habit day, plus live prefixes. */
   readDay(date: DayKey): Promise<PresenceRead>
   /** Flush the live prefixes and stop using the domain. */
@@ -144,6 +168,108 @@ export function createPresence(input: {
     await append(day, event('presence', 'in', sessionId, clientId, connectionId, at))
   }
 
+  /** What a run of raw events folds into: closed intervals, prompts, and the
+   *  segments an `in` never closed (whose last beat is their observed end). */
+  interface Folded {
+    readonly segments: readonly AttentionSegment[]
+    readonly prompts: readonly AttentionPrompt[]
+    readonly open: ReadonlyMap<string, { readonly sessionId: string; readonly startedAt: string; readonly endedAt: string }>
+  }
+
+  /**
+   * Fold one day's events into the intervals the attention model consumes.
+   *
+   * This is the *only* place that knows how in/beat/out pair up, which is what
+   * lets compaction and the live read produce the same answer: a compacted day
+   * stores exactly what this returns, and `readDay` hands it back unchanged.
+   */
+  function fold(events: readonly PresenceEvent[]): Folded {
+    const ordered = [...events].sort((left, right) => Date.parse(left.at) - Date.parse(right.at))
+    const open = new Map<string, { sessionId: string; startedAt: string; endedAt: string }>()
+    const segments: AttentionSegment[] = []
+    const prompts: AttentionPrompt[] = []
+
+    for (const item of ordered) {
+      if (item.kind === 'prompt') {
+        prompts.push({ sessionId: item.sessionId, at: item.at })
+        continue
+      }
+      const key = sessionKey(item.sessionId, item.clientId, item.connectionId)
+      if (item.state === 'out') {
+        const current = open.get(key)
+        if (current === undefined) continue
+        open.delete(key)
+        segments.push({ sessionId: current.sessionId, startedAt: current.startedAt, endedAt: item.at })
+        continue
+      }
+      if (item.state === 'in') {
+        const current = open.get(key)
+        if (current !== undefined) {
+          // A second `in` on a key is a fresh observation after a host
+          // restart — a live key's `in` writes nothing, so this cannot be a
+          // retry. Close the old segment at its last observed instant and
+          // start a new one: the downtime then becomes a gap the three-minute
+          // bridge can judge, instead of being credited as attention.
+          segments.push({ sessionId: current.sessionId, startedAt: current.startedAt, endedAt: current.endedAt })
+          open.delete(key)
+        }
+        open.set(key, { sessionId: item.sessionId, startedAt: item.at, endedAt: item.at })
+        continue
+      }
+      // beat
+      const current = open.get(key)
+      if (current !== undefined) current.endedAt = item.at
+    }
+
+    return { segments, prompts, open }
+  }
+
+  const ledger = createLedger(input.domain)
+
+  /**
+   * Fold one raw day into the ledger and drop its events.
+   *
+   * Ledger ids are deterministic (`talk:<session>:<start>`), so an interrupted
+   * pass that wrote before deleting cannot double a row when it runs again.
+   */
+  async function compact(day: DayKey): Promise<void> {
+    const doc = table.get(day)
+    if (doc === undefined) return
+    const folded = fold(doc.events)
+    // A visit that is still running keeps its `in` in this document, because
+    // every later beat and the eventual `out` are written to the day the
+    // session **started** in. Folding it away would delete that anchor: the
+    // rest of the visit would rebuild the document without an `in`, fold to
+    // nothing, and the tail would be lost for good — the very thing this window
+    // exists to preserve. Wait until the session ends (the sweep closes it at
+    // its lastSeen within a minute of going silent).
+    for (const key of folded.open.keys()) {
+      if (active.has(key)) return
+    }
+    // An `in` with no `out` ends at its last beat; with no beat at all it is
+    // zero-length and says nothing, so it is dropped rather than stored as an
+    // empty row.
+    const spans = [...folded.segments, ...[...folded.open.values()]]
+      .filter(segment => Date.parse(segment.endedAt) > Date.parse(segment.startedAt))
+    const items: TimeItem[] = [
+      ...spans.map(segment => ({
+        kind: 'talk' as const,
+        id: `talk:${segment.sessionId}:${segment.startedAt}`,
+        session: segment.sessionId,
+        startedAt: segment.startedAt,
+        endedAt: segment.endedAt,
+      })),
+      ...folded.prompts.map(prompt => ({
+        kind: 'prompt' as const,
+        id: `prompt:${prompt.sessionId}:${prompt.at}`,
+        session: prompt.sessionId,
+        at: prompt.at,
+      })),
+    ]
+    await ledger.write(day, items)
+    await table.delete(day)
+  }
+
   return {
     async in(sessionId, clientId, connectionId) {
       await enqueue(async () => {
@@ -217,49 +343,37 @@ export function createPresence(input: {
       // The read waits for the write chain: a half-applied segment is worse
       // than a slightly older one.
       await chain
-      const doc = table.get(date)
-      const events = [...(doc?.events ?? [])].sort((left, right) => Date.parse(left.at) - Date.parse(right.at))
-      const open = new Map<string, { sessionId: string; startedAt: string; endedAt: string }>()
-      const segments: AttentionSegment[] = []
-      const prompts: AttentionPrompt[] = []
-
-      for (const item of events) {
-        if (item.kind === 'prompt') {
-          prompts.push({ sessionId: item.sessionId, at: item.at })
-          continue
-        }
-        const key = sessionKey(item.sessionId, item.clientId, item.connectionId)
-        if (item.state === 'out') {
-          const current = open.get(key)
-          if (current === undefined) continue
-          open.delete(key)
-          segments.push({ sessionId: current.sessionId, startedAt: current.startedAt, endedAt: item.at })
-          continue
-        }
-        if (item.state === 'in') {
-          const current = open.get(key)
-          if (current !== undefined) {
-            // A second `in` on a key is a fresh observation after a host
-            // restart — a live key's `in` writes nothing, so this cannot be a
-            // retry. Close the old segment at its last observed instant and
-            // start a new one: the downtime then becomes a gap the three-minute
-            // bridge can judge, instead of being credited as attention.
-            segments.push({ sessionId: current.sessionId, startedAt: current.startedAt, endedAt: current.endedAt })
-            open.delete(key)
-          }
-          open.set(key, { sessionId: item.sessionId, startedAt: item.at, endedAt: item.at })
-          continue
-        }
-        // beat
-        const current = open.get(key)
-        if (current !== undefined) current.endedAt = item.at
+      const folded = fold(table.get(date)?.events ?? [])
+      // Two sources, one answer: an old day's intervals live in the ledger, and
+      // a day caught between the ledger write and the raw delete has both. Keyed
+      // by what a row *is*, so the union cannot draw the same visit twice.
+      const segments = new Map<string, AttentionSegment>()
+      const prompts = new Map<string, AttentionPrompt>()
+      const keepSegment = (segment: AttentionSegment): void => {
+        segments.set(
+          `${segment.sessionId}${KEY_SEPARATOR}${segment.startedAt}${KEY_SEPARATOR}${segment.endedAt}`,
+          segment,
+        )
       }
+      const keepPrompt = (prompt: AttentionPrompt): void => {
+        prompts.set(`${prompt.sessionId}${KEY_SEPARATOR}${prompt.at}`, prompt)
+      }
+
+      for (const item of ledger.read(date)) {
+        if (item.kind === 'talk') {
+          keepSegment({ sessionId: item.session, startedAt: item.startedAt, endedAt: item.endedAt })
+        } else if (item.kind === 'prompt') {
+          keepPrompt({ sessionId: item.session, at: item.at })
+        }
+      }
+      for (const segment of folded.segments) keepSegment(segment)
+      for (const prompt of folded.prompts) keepPrompt(prompt)
 
       // A stored `in` without an `out`: the client vanished. Its observed end is
       // the last beat, or the live lastSeen when the host still has it.
-      for (const [key, current] of open) {
+      for (const [key, current] of folded.open) {
         const live = active.get(key)
-        segments.push({
+        keepSegment({
           sessionId: current.sessionId,
           startedAt: current.startedAt,
           endedAt: live?.lastSeenAt ?? current.endedAt,
@@ -268,11 +382,26 @@ export function createPresence(input: {
       // A live session whose `in` somehow is not in this day's document (a host
       // that recovered from a shape it did not write) still contributes its prefix.
       for (const [key, live] of active) {
-        if (open.has(key) || live.day !== date) continue
-        segments.push({ sessionId: live.sessionId, startedAt: live.startedAt, endedAt: live.lastSeenAt })
+        if (folded.open.has(key) || live.day !== date) continue
+        keepSegment({ sessionId: live.sessionId, startedAt: live.startedAt, endedAt: live.lastSeenAt })
       }
 
-      return { segments, prompts }
+      return { segments: [...segments.values()], prompts: [...prompts.values()] }
+    },
+
+    async maintain() {
+      const today = dayOf(input.now().toISOString())
+      // `PRESENCE_RAW_DAYS` counts the days that keep their events, today
+      // included — so the first day to fold is this one.
+      const oldestRaw = shiftDayKey(today, -(PRESENCE_RAW_DAYS - 1))
+      await enqueue(async () => {
+        // The raw table is the queue: a compacted day is deleted in the same
+        // pass, so in the steady state this loop holds three keys at most.
+        for (const day of [...table.keys()]) {
+          if (day >= oldestRaw) continue
+          await compact(day)
+        }
+      })
     },
 
     async close() {

@@ -342,7 +342,6 @@ export const handlers: Record<RouteName, RouteHandler> = {
       ...buildTime({
         store: ctx.store,
         date,
-        today: ctx.today(),
         boundary: ctx.boundary,
         presence,
         now: ctx.now(),

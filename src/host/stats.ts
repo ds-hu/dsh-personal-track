@@ -372,13 +372,14 @@ export function buildStats(
   }).length
 
   // --- focus: closed sessions that started inside the range
-  const closedFocus = [
-    ...registry.media.flatMap(entry => entry.focusSessions),
-    ...registry.tasks.flatMap(entry => entry.focusSessions),
-    ...registry.todos.flatMap(entry => entry.focusSessions),
-  ].flatMap(session => (session.endedAt === undefined || !finishedInRange(session.startedAt)
-    ? []
-    : [{ startedAt: session.startedAt, endedAt: session.endedAt }]))
+  // Read through the store, not through the registry lists: an entry that has
+  // been deleted keeps its time in the ledger, and a total that dropped it
+  // would answer a different question from the rows it sits beside.
+  const closedFocus = store.focusSources()
+    .flatMap(source => source.sessions)
+    .flatMap(session => (session.endedAt === undefined || !finishedInRange(session.startedAt)
+      ? []
+      : [{ startedAt: session.startedAt, endedAt: session.endedAt }]))
   const focus = { seconds: focusSeconds(closedFocus), sessions: closedFocus.length }
 
   return {

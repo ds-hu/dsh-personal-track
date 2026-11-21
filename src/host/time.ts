@@ -32,7 +32,7 @@ import { unionSeconds, type TimeInterval } from '../shared/time-union.ts'
 import { buildAttention } from './attention.ts'
 import type { DayRecord } from './domain.ts'
 import type { PresenceRead } from './presence.ts'
-import type { HabitStore } from './store.ts'
+import type { FocusSource, HabitStore } from './store.ts'
 
 /** One interval as the wire carries it. Re-exported so the two halves name one type. */
 export type { TimeInterval } from '../shared/time-union.ts'
@@ -100,17 +100,19 @@ export const CHECK_MINUTES = {
 export function buildTime(input: {
   readonly store: HabitStore
   readonly date: DayKey
-  readonly today: DayKey
   readonly boundary: DayBoundary
   readonly presence: PresenceRead
   readonly now: Date
 }): TimeView {
-  const { store, date, today, boundary, presence, now } = input
-  const view = store.view(date, today)
+  const { store, date, boundary, presence, now } = input
   const facts = store.dayFacts(date)
   const day = facts.day
+  // Read once and hand the same list to both readers below: a row and a hole
+  // must agree about which sessions exist, and `focusSources` is where a deleted
+  // entry's sessions still count.
+  const sources = store.focusSources()
 
-  const focus = focusRows(view, date, boundary)
+  const focus = focusRows(sources, date, boundary)
   const records = recordRows(day)
   const startHour = boundary.dayStartHour
   const clock = `${String(startHour).padStart(2, '0')}:00`
@@ -127,7 +129,7 @@ export function buildTime(input: {
     // An open focus session is a hole too: the user is focusing right now, and
     // the conversation should not claim that minute. It is not a focus *row*
     // (the rows are closed sessions) but it is a subtraction.
-    focus: focusHoles(view, date, boundary, now),
+    focus: focusHoles(sources, date, boundary, now),
     from,
     to,
   })
@@ -166,25 +168,24 @@ export function buildTime(input: {
   }
 }
 
-/** The three registries, flattened for the focus rows and the focus holes. */
-function focusEntries(view: ReturnType<HabitStore['view']>) {
-  return [
-    ...view.tasks.map(entry => ({ owner: 'task', ...entry })),
-    ...view.media.map(entry => ({ owner: 'media', ...entry })),
-    ...view.todos.map(entry => ({ owner: 'todo', ...entry })),
-  ]
-}
-
-/** One entry's closed, day-owned sessions as a focus row. */
+/**
+ * One entry's closed, day-owned sessions as a focus row.
+ *
+ * The sources come from the store rather than from the day slice, because an
+ * entry that has been deleted keeps its time: the ledger holds those sessions
+ * under the title the entry had (see `timeDay` in `domain.ts`). A row
+ * therefore needs nothing from the registry except a name to print, and this is
+ * the reader that makes "the hour is still there" true.
+ */
 function focusRows(
-  view: ReturnType<HabitStore['view']>,
+  sources: readonly FocusSource[],
   date: DayKey,
   boundary: DayBoundary,
 ): TimeRow[] {
   const rows: TimeRow[] = []
-  for (const entry of focusEntries(view)) {
+  for (const entry of sources) {
     const intervals: TimeInterval[] = []
-    for (const session of entry.focusSessions) {
+    for (const session of entry.sessions) {
       if (session.endedAt === undefined) continue
       const started = Date.parse(session.startedAt)
       if (!Number.isFinite(started)) continue
@@ -210,17 +211,19 @@ function focusRows(
  * The rows above are closed sessions only — an open focus has no row to draw —
  * but it still hides the conversation, so the subtraction takes the open
  * session's prefix up to `now`. A focus session belongs to the day it started
- * in, exactly like the rows.
+ * in, exactly like the rows. Deleted entries subtract here too: their hour was
+ * still an hour nobody was talking, and dropping the hole with the record is
+ * what used to make yesterday's conversation time grow when a todo was deleted.
  */
 function focusHoles(
-  view: ReturnType<HabitStore['view']>,
+  sources: readonly FocusSource[],
   date: DayKey,
   boundary: DayBoundary,
   now: Date,
 ): TimeInterval[] {
   const holes: TimeInterval[] = []
-  for (const entry of focusEntries(view)) {
-    for (const session of entry.focusSessions) {
+  for (const entry of sources) {
+    for (const session of entry.sessions) {
       const started = Date.parse(session.startedAt)
       if (!Number.isFinite(started)) continue
       if (habitDayKey(new Date(started), boundary) !== date) continue

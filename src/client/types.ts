@@ -290,6 +290,43 @@ export type TaskRecordWire = Omit<TaskEntry, 'state' | 'overdue' | 'focusSeconds
 /** A media entry as a backup file carries it: stored facts only. */
 export type MediaRecordWire = Omit<MediaEntry, 'focusSeconds'>
 
+/**
+ * One closed interval in the time ledger, as the backup carries it.
+ *
+ * `focus` is a deleted entry's session (with the title it had when it went);
+ * `talk` is a conversation visit folded out of raw presence; `prompt` is the
+ * instant a two-minute attention tail is derived from.
+ */
+export type TimeItemWire =
+  | {
+      readonly kind: 'focus'
+      readonly id: string
+      readonly entry: string
+      readonly entryKind: RegistryKind
+      readonly title: string
+      readonly startedAt: string
+      readonly endedAt: string
+    }
+  | {
+      readonly kind: 'talk'
+      readonly id: string
+      readonly session: string
+      readonly startedAt: string
+      readonly endedAt: string
+    }
+  | {
+      readonly kind: 'prompt'
+      readonly id: string
+      readonly session: string
+      readonly at: string
+    }
+
+/** One habit day's durable time. */
+export interface TimeDayWire {
+  readonly date: string
+  readonly items: readonly TimeItemWire[]
+}
+
 /** How an import treats what is already stored. */
 export type ImportMode = 'merge' | 'replace'
 
@@ -330,6 +367,8 @@ export interface BackupBundle {
   readonly tasks: readonly TaskRecordWire[]
   /** The left column's list; absent in a version 3 file, which had none. */
   readonly todos?: readonly TodoRecordWire[]
+  /** Closed intervals outliving their source; absent before version 6. */
+  readonly time?: readonly TimeDayWire[]
   /** Material image bytes; absent in a version 1 file, which carries none. */
   readonly assets?: readonly AssetBundleEntry[]
   /** Raw conversation events; absent before version 5. */
@@ -356,6 +395,8 @@ export interface ImportReport {
   readonly assets: number
   /** Raw conversation events carried by the file (version 5 and up). */
   readonly presence: number
+  /** Closed intervals carried by the file's time ledger (version 6 and up). */
+  readonly time: number
   /** Records dropped because `replace` cleared keys the file did not carry. */
   readonly removed: number
 }

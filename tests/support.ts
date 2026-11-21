@@ -43,11 +43,22 @@ class MemoryTable {
 
   readonly #schema: ZodType | undefined
 
+  /**
+   * How long a `put` stays in flight before the record becomes readable.
+   *
+   * The real domain awaits `putRecord` and only then mutates its in-memory map,
+   * so a writer that reads between another writer's `put` starting and landing
+   * sees the old document. Without this delay the fake hides every
+   * read-modify-write race by making the write visible instantly.
+   */
+  readonly #writeDelayMs: number
+
   /** Tail of the per-domain write chain; `update` serializes on it. */
   #chain: Promise<unknown> = Promise.resolve()
 
-  constructor(schema?: ZodType) {
+  constructor(schema?: ZodType, writeDelayMs = 0) {
     this.#schema = schema
+    this.#writeDelayMs = writeDelayMs
   }
 
   /** Parse one record the way the durable boundary would. */
@@ -73,6 +84,9 @@ class MemoryTable {
   }
 
   async put(key: string, value: unknown): Promise<void> {
+    if (this.#writeDelayMs > 0) {
+      await new Promise(resolve => setTimeout(resolve, this.#writeDelayMs))
+    }
     this.records.set(key, this.#parse(value))
   }
 
@@ -112,9 +126,11 @@ class MemoryTable {
 class MemoryDomain<S extends DomainSpec> {
   readonly #spec: S
   readonly #tables = new Map<string, MemoryTable>()
+  readonly #writeDelayMs: number
 
-  constructor(spec: S) {
+  constructor(spec: S, writeDelayMs = 0) {
     this.#spec = spec
+    this.#writeDelayMs = writeDelayMs
   }
 
   get name(): S['name'] {
@@ -126,7 +142,7 @@ class MemoryDomain<S extends DomainSpec> {
     if (existing !== undefined) return existing
     const declared = this.#spec.tables[name]
     if (declared === undefined) throw new Error(`undeclared table: ${name}`)
-    const created = new MemoryTable(declared.valueSchema as ZodType)
+    const created = new MemoryTable(declared.valueSchema as ZodType, this.#writeDelayMs)
     this.#tables.set(name, created)
     return created
   }
@@ -136,9 +152,14 @@ class MemoryDomain<S extends DomainSpec> {
   }
 }
 
-/** Build the in-memory domain, bridged once to the plugin's `HabitDomain`. */
-export function memoryDomain(): HabitDomain {
-  return new MemoryDomain(habitDomainSpec) as unknown as HabitDomain
+/**
+ * Build the in-memory domain, bridged once to the plugin's `HabitDomain`.
+ *
+ * @param options - `writeDelayMs` makes a `put` durable-before-readable the way
+ *   the real backend does; a race test needs that ordering to be visible.
+ */
+export function memoryDomain(options: { readonly writeDelayMs?: number } = {}): HabitDomain {
+  return new MemoryDomain(habitDomainSpec, options.writeDelayMs ?? 0) as unknown as HabitDomain
 }
 
 // --- a fixed clock -----------------------------------------------------------

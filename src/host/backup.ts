@@ -3,7 +3,8 @@
  * back in.
  *
  * A backup holds **stored facts only** — days, the laundry counter, media,
- * tasks, and the material images those entries reference
+ * tasks, the time ledger's closed intervals, and the material images those
+ * entries reference
  * (docs/adr/0002-derived-state-not-stored.md). No cell, ratio, streak, overdue
  * flag or focus duration appears in it, so importing one recomputes all of them
  * from the records themselves; there is nothing in the file that can disagree
@@ -13,7 +14,7 @@
  * or hand-edited backup is refused as a whole instead of landing half-applied.
  */
 import { z } from 'zod'
-import { assetRecord, counterRecord, dayRecord, mediaRecord, presenceDay, taskRecord, todoRecord } from './domain.ts'
+import { assetRecord, counterRecord, dayRecord, mediaRecord, presenceDay, taskRecord, timeDay, todoRecord } from './domain.ts'
 import type { HabitDomain } from './domain.ts'
 import type { DayKey } from '../shared/habit-day.ts'
 
@@ -42,18 +43,25 @@ export const BACKUP_FORMAT = 'personal-track/backup'
  * versions 1–4, which means "no presence observed"; the read-side attention
  * model is still derived, so a restored file carries observations, not the
  * two-minute/three-minute windows.
+ *
+ * Version 6 adds the `time` array: the closed intervals that outlive their
+ * source — a deleted entry's focus sessions, and the conversation visits of days
+ * older than the raw window. Absent in versions 1–5, which means "no drawer
+ * existed yet": the sessions those files carry are the ones still on a live
+ * entry. A file without the array restores as an empty ledger, so importing one
+ * cannot invent or lose time that was never there.
  */
-export const BACKUP_VERSION = 5
+export const BACKUP_VERSION = 6
 
 /** Every file layout this build can read. */
-export const READABLE_BACKUP_VERSIONS: readonly number[] = [1, 2, 3, 4, BACKUP_VERSION]
+export const READABLE_BACKUP_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, BACKUP_VERSION]
 
 const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/
 
 /** The file layout. Arrays, not maps: each record already carries its own key. */
 export const backupBundle = z.object({
   format: z.literal(BACKUP_FORMAT),
-  version: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
+  version: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5), z.literal(6)]),
   /** When the file was written; informational, never applied on import. */
   exportedAt: z.string().min(1),
   days: z.array(dayRecord.extend({ date: z.string().regex(DATE_KEY, 'date must be YYYY-MM-DD') })),
@@ -62,6 +70,11 @@ export const backupBundle = z.object({
   tasks: z.array(taskRecord),
   /** The left column's list. Absent in a version 3 file, which had none. */
   todos: z.array(todoRecord).default([]),
+  /**
+   * The closed intervals whose source is gone or has aged out. Absent before
+   * version 6, which means none were kept — those files predate the ledger.
+   */
+  time: z.array(timeDay.extend({ date: z.string().regex(DATE_KEY, 'date must be YYYY-MM-DD') })).default([]),
   /** Material image bytes. Absent in a version 1 file, which carries no images. */
   assets: z.array(assetRecord).default([]),
   /**
@@ -91,6 +104,8 @@ export interface ImportReport {
   readonly assets: number
   /** Raw conversation events carried by the file (version 5 and up). */
   readonly presence: number
+  /** Closed intervals carried by the file's time ledger (version 6 and up). */
+  readonly time: number
   /** Records dropped because `replace` cleared keys the file did not carry. */
   readonly removed: number
 }
@@ -151,6 +166,7 @@ export function createBackup(domain: HabitDomain): Backup {
   const media = domain.table('media')
   const tasks = domain.table('tasks')
   const todos = domain.table('todos')
+  const time = domain.table('time')
   const assets = domain.table('assets')
   const presence = domain.table('presence')
 
@@ -183,6 +199,9 @@ export function createBackup(domain: HabitDomain): Backup {
         media: byCreatedAt([...media.entries()].map(([, record]) => record)),
         tasks: byCreatedAt([...tasks.entries()].map(([, record]) => record)),
         todos: byCreatedAt([...todos.entries()].map(([, record]) => record)),
+        time: [...time.entries()]
+          .map(([, record]) => record)
+          .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)),
         assets: [...assets.entries()].map(([, record]) => record),
         presence: [...presence.entries()]
           .map(([, record]) => record)
@@ -215,6 +234,7 @@ export function createBackup(domain: HabitDomain): Backup {
       const mediaIds = new Set(bundle.media.map(record => record.id))
       const taskIds = new Set(bundle.tasks.map(record => record.id))
       const todoIds = new Set(bundle.todos.map(record => record.id))
+      const timeKeys = new Set(bundle.time.map(record => record.date as DayKey))
       const presenceKeys = new Set(bundle.presence.map(record => record.date as DayKey))
 
       let removed = 0
@@ -224,6 +244,7 @@ export function createBackup(domain: HabitDomain): Backup {
         removed += await prune(media, mediaIds)
         removed += await prune(tasks, taskIds)
         removed += await prune(todos, todoIds)
+        removed += await prune(time, timeKeys)
         // Assets are keyed by id alone; `replace` clears the ones the file
         // omits, which is also what makes a restore into a dirty root exact.
         removed += await prune(assets, assetIds)
@@ -237,6 +258,7 @@ export function createBackup(domain: HabitDomain): Backup {
       for (const record of bundle.media) await media.put(record.id, record)
       for (const record of bundle.tasks) await tasks.put(record.id, record)
       for (const record of bundle.todos) await todos.put(record.id, record)
+      for (const record of bundle.time) await time.put(record.date as DayKey, record)
       for (const record of bundle.assets) await assets.put(record.id, record)
       for (const record of bundle.presence) await presence.put(record.date as DayKey, record)
 
@@ -249,6 +271,7 @@ export function createBackup(domain: HabitDomain): Backup {
         counters: counterKeys.size,
         assets: bundle.assets.length,
         presence: bundle.presence.reduce((sum, record) => sum + record.events.length, 0),
+        time: bundle.time.reduce((sum, record) => sum + record.items.length, 0),
         removed,
       }
     },

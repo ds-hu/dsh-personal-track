@@ -548,9 +548,43 @@ assert.equal(tickedTodo.body.entry.done, true)
 assert.equal(typeof tickedTodo.body.entry.completedAt, 'string', 'ticking stamps its instant')
 console.log('todos ✓  (a title and its own done, beside the two registries)')
 
+// --- deleting an entry keeps the time spent on it ----------------------------
+// The pinned clock stamps every session zero-length (see the focus section), so
+// this one arrives through a real import instead: a restored file is the one
+// path that can carry an instant the clock did not choose.
+const carrying = (await source.call('GET', '/backup')).body.backup
+const focusedTodo = {
+  id: 'todo-focused',
+  title: '带专注的待办',
+  done: false,
+  createdAt: '2026-09-16T00:00:00Z',
+  materials: [],
+  focusSessions: [{
+    id: 'fs1', startedAt: '2026-09-16T09:00:00+08:00', endedAt: '2026-09-16T10:00:00+08:00',
+  }],
+}
+const carried = await source.call('POST', '/backup', {
+  mode: 'merge',
+  backup: { ...carrying, todos: [...carrying.todos, focusedTodo] },
+})
+assert.equal(carried.status, 200)
+await source.call('DELETE', '/todos?id=todo-focused')
+
+const afterDelete = (await source.call('GET', `/time?date=${DATE}`)).body
+const keptRow = afterDelete.focus.find(row => row.id === 'todo:todo-focused')
+assert.ok(keptRow, 'the focus row outlives the todo it belonged to')
+assert.equal(keptRow.title, '带专注的待办', 'and still says what the time was spent on')
+assert.equal(keptRow.seconds, 3600)
+const afterDeleteStats = (await source.call('GET', `/stats?from=${DATE}&to=${DATE}`)).body
+assert.equal(afterDeleteStats.focus.seconds, 3600, '累计专注 keeps it too')
+console.log('deleted entries ✓  (the hour survives the record, in the time view and the total)')
+
 const backup = (await source.call('GET', '/backup')).body.backup
 assert.equal(backup.format, 'personal-track/backup')
-assert.equal(backup.version, 5, 'raw conversation presence moved the file layout to 5')
+assert.equal(backup.version, 6, 'the deleted entries’ focus sessions moved the file layout to 6')
+assert.equal(backup.time.length, 1, 'and the ledger travels in the file')
+assert.equal(backup.time[0].items[0].kind, 'focus')
+assert.equal(backup.time[0].items[0].title, '带专注的待办')
 assert.equal(backup.presence.length, 0, 'this fixture observed no conversation')
 assert.equal(backup.days.length, 1, 'the saved day is in the backup')
 assert.equal(backup.days[0].date, DATE)
@@ -577,6 +611,7 @@ const applied = await restored.call('POST', '/backup', { mode: 'replace', backup
 assert.equal(applied.status, 200)
 assert.equal(applied.body.report.days, 1)
 assert.equal(applied.body.report.assets, 1, 'the image travelled with the file')
+assert.equal(applied.body.report.time, 1, 'so did the deleted entry’s focus interval')
 assert.equal(applied.body.report.removed, 0, 'an empty root had nothing to replace')
 assert.equal(applied.body.stock.pending, 2, 'the imported stock is live')
 const restoredDay = (await restored.call('GET', `/state?date=${DATE}`)).body
@@ -588,6 +623,11 @@ assert.equal(restoredDay.tasks.find(task => task.id === lateId)?.state, 'done', 
 assert.equal(restoredDay.todos.length, 1, 'the todo came back with the file')
 assert.equal(restoredDay.todos[0].title, '买挂钩')
 assert.equal(restoredDay.todos[0].done, true, 'a done is a stored fact, so it survives the trip')
+const restoredTime = (await restored.call('GET', `/time?date=${DATE}`)).body
+assert.ok(
+  restoredTime.focus.some(row => row.id === 'todo:todo-focused' && row.seconds === 3600),
+  'the deleted entry’s hour is drawn again from the restored log',
+)
 
 // The image's bytes came back with the file: a material is only a reference,
 // so a restore that lost them would have to say so rather than draw nothing.

@@ -15,8 +15,10 @@
  */
 import { strict as assert } from 'node:assert'
 import { createChecker, fixedClock, memoryDomain, testConfig } from './support.ts'
+import { boundaryOf } from '../src/host/config.ts'
 import { createHabitStore, type HabitStore } from '../src/host/store.ts'
 import { focusSeconds } from '../src/shared/focus-session.ts'
+import { habitDayKey } from '../src/shared/habit-day.ts'
 import type { HabitDomain } from '../src/host/domain.ts'
 
 const checker = createChecker('focus sessions and materials')
@@ -228,6 +230,86 @@ await checkAsync('a task with no materials reads with an empty list, not undefin
   assert.deepEqual(task?.materials, [])
   assert.deepEqual(task?.focusSessions, [])
   assert.equal(task?.focusSeconds, 0)
+})
+
+// --- the log: deleting an entry does not delete the time ---------------------
+
+await checkAsync('deleting an entry keeps its closed sessions, under the title it had', async () => {
+  const { store, domain } = storeAt()
+  const id = await newTask(store, '买挂钩')
+  const sessionId = await store.startFocus('task', id)
+  const later = createHabitStore(domain, testConfig({ now: fixedClock('2026-09-16T12:30:00Z') }))
+  await later.endFocus('task', id, sessionId)
+
+  await later.deleteTask(id)
+  assert.deepEqual(later.view('2026-09-16', '2026-09-16').tasks, [], 'the entry itself is gone')
+
+  const sources = later.focusSources()
+  assert.deepEqual(
+    sources.map(source => [source.owner, source.id, source.title, focusSeconds(source.sessions)]),
+    [['task', id, '买挂钩', 30 * 60]],
+    'the half hour it was focused on survived the delete',
+  )
+  // And it survives as a row on the day it *started* in, which is the day the
+  // time view would draw it on.
+  const day = habitDayKey(new Date('2026-09-16T12:00:00Z'), boundaryOf(testConfig()))
+  assert.deepEqual(domain.table('time').get(day)?.items, [{
+    kind: 'focus',
+    id: sessionId,
+    entry: id,
+    entryKind: 'task',
+    title: '买挂钩',
+    startedAt: '2026-09-16T12:00:00.000Z',
+    endedAt: '2026-09-16T12:30:00.000Z',
+  }])
+})
+
+await checkAsync('a session still open when the entry goes is dropped, not closed', async () => {
+  const { store, domain } = storeAt()
+  const id = await newTask(store)
+  await store.startFocus('task', id)
+  await store.deleteTask(id)
+  assert.deepEqual(store.focusSources(), [], 'an end nobody observed is not an end')
+  assert.equal(domain.table('time').size, 0, 'so the ledger gets no row either')
+})
+
+await checkAsync('an entry with nothing to keep writes no ledger row', async () => {
+  const { store, domain } = storeAt()
+  const id = await newTask(store)
+  await store.deleteTask(id)
+  assert.equal(domain.table('time').size, 0)
+})
+
+await checkAsync('a delete interrupted after the ledger write is repaired by session id', async () => {
+  const { store, domain } = storeAt()
+  const id = await newTask(store, '买挂钩')
+  await store.putTask({
+    id,
+    title: '买挂钩',
+    progress: { current: 0 },
+    checkpoints: [],
+    materials: [],
+    focusSessions: [{ id: 'f1', startedAt: '2026-09-16T10:00:00Z', endedAt: '2026-09-16T10:30:00Z' }],
+    createdAt: '2026-09-16T11:00:00Z',
+  })
+  // What a crash between the two writes leaves: the ledger holds the interval,
+  // and the entry it belongs to is still there, holding the same session.
+  const day = habitDayKey(new Date('2026-09-16T10:00:00Z'), boundaryOf(testConfig()))
+  await domain.table('time').put(day, {
+    date: day,
+    items: [{
+      kind: 'focus', id: 'f1', entry: id, entryKind: 'task', title: '买挂钩',
+      startedAt: '2026-09-16T10:00:00Z', endedAt: '2026-09-16T10:30:00Z',
+    }],
+  })
+  assert.equal(store.focusSources().length, 1, 'the same session lives in two places for now')
+
+  await store.deleteTask(id)
+  const sources = store.focusSources()
+  assert.equal(sources.length, 1)
+  assert.deepEqual(sources[0]?.sessions.map(session => session.id), ['f1'], 'and is counted once')
+  assert.equal(focusSeconds(sources[0]!.sessions), 30 * 60, 'half an hour, not an hour')
+  assert.equal(domain.table('time').get(day)?.items.length, 1, 'the ledger did not grow a duplicate neither')
 })
 
 report()

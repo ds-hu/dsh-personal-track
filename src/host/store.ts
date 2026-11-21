@@ -12,19 +12,22 @@
  */
 import { randomUUID } from 'node:crypto'
 import { ApiError } from './api-error.ts'
-import { clockOf, type Config, type VocabTarget } from './config.ts'
+import { clockOf, boundaryOf, type Config, type VocabTarget } from './config.ts'
 import type {
   AssetRecord,
   CounterRecord,
   DayRecord,
+  FocusSession,
   HabitDomain,
   Material,
   MediaRecord,
   RegistryRecord,
   TaskRecord,
+  TimeItem,
   TodoRecord,
 } from './domain.ts'
 import { assetRecord, dayRecord, mediaRecord, taskRecord, todoRecord } from './domain.ts'
+import { createLedger } from './ledger.ts'
 import { habitOf, type CheckHabit } from './habits.ts'
 import {
   cellProgress,
@@ -39,7 +42,7 @@ import {
   type VocabProgress,
 } from './derive.ts'
 import { focusSeconds, withClosedSession, withOpenedSession } from '../shared/focus-session.ts'
-import type { DayKey } from '../shared/habit-day.ts'
+import { habitDayKey, type DayKey } from '../shared/habit-day.ts'
 
 /** The laundry stock's key inside the counters table. */
 export const LAUNDRY_KEY = 'laundry'
@@ -128,6 +131,21 @@ export interface TaskView extends TaskRecord {
 
 /** Which registry a material or focus session belongs to. */
 export type OwnerKind = 'task' | 'media' | 'todo'
+
+/**
+ * One entry's focus sessions, as the readers of time see them.
+ *
+ * `owner` + `id` name the entry; `title` is the entry's, or — for an entry that
+ * has been deleted — the snapshot the ledger took when it went. Nothing here
+ * says whether the entry still exists, because the answer is the same either
+ * way: the time was spent, and the row prints it under the name it had.
+ */
+export interface FocusSource {
+  readonly owner: OwnerKind
+  readonly id: string
+  readonly title: string
+  readonly sessions: readonly FocusSession[]
+}
 
 /**
  * A todo as the view carries it.
@@ -257,6 +275,16 @@ export interface HabitStore {
   startFocus(owner: OwnerKind, id: string): Promise<string>
   /** Close one focus session; an already-closed one is left alone. */
   endFocus(owner: OwnerKind, id: string, sessionId: string): Promise<void>
+  /**
+   * Every entry's focus sessions — live entries first, deleted ones after.
+   *
+   * The two readers of focus time (the time view and **累计专注**) both go
+   * through this one call, so "deleting an entry does not delete the time spent
+   * on it" is a single rule instead of two that can drift. Sessions are
+   * de-duplicated by id: a delete interrupted between the ledger write and the
+   * record delete leaves the same session in both places.
+   */
+  focusSources(): readonly FocusSource[]
   /** Delete every asset nothing references; answers how many went. */
   sweepOrphanAssets(): Promise<number>
   /** The images on finished entries — what the prune below would take. */
@@ -416,6 +444,9 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
   const media = domain.table('media')
   const tasks = domain.table('tasks')
   const todos = domain.table('todos')
+  const ledger = createLedger(domain)
+  /** The habit-day boundary a retired session is filed under. */
+  const boundary = boundaryOf(config)
   const assets = domain.table('assets')
 
   /**
@@ -597,6 +628,40 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
     }
   }
 
+  /**
+   * File an entry's closed focus sessions in the day ledger before it goes.
+   *
+   * A session is filed under the habit day it **started** in — the same rule the
+   * time view and 累计专注 read by, so a row can never land on a day that would
+   * not draw it. Written *ahead* of the delete, never after it: a crash in
+   * between leaves the entry alive with its sessions recorded twice, which
+   * `focusSources` repairs by session id, while the other order would lose them
+   * to a crash — the loss this table exists to prevent. A still-open session is
+   * dropped, because an end nobody observed is not an end.
+   */
+  async function archiveFocus(kind: OwnerKind, record: RegistryRecord | undefined): Promise<void> {
+    if (record === undefined) return
+    const byDay = new Map<DayKey, TimeItem[]>()
+    for (const session of record.focusSessions) {
+      if (session.endedAt === undefined) continue
+      const started = Date.parse(session.startedAt)
+      if (!Number.isFinite(started)) continue
+      const day = habitDayKey(new Date(started), boundary)
+      const items = byDay.get(day) ?? []
+      items.push({
+        kind: 'focus',
+        id: session.id,
+        entry: record.id,
+        entryKind: kind,
+        title: record.title,
+        startedAt: session.startedAt,
+        endedAt: session.endedAt,
+      })
+      byDay.set(day, items)
+    }
+    for (const [day, items] of byDay) await ledger.write(day, items)
+  }
+
   const store: HabitStore = {
     readDay: key => days.get(key),
 
@@ -755,6 +820,7 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
 
     deleteMedia: async (id) => {
       const record = media.get(id)
+      await archiveFocus('media', record)
       const removed = await media.delete(id)
       await dropAssetsOf(record)
       return removed
@@ -809,6 +875,7 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
 
     deleteTask: async (id) => {
       const record = tasks.get(id)
+      await archiveFocus('task', record)
       const removed = await tasks.delete(id)
       await dropAssetsOf(record)
       return removed
@@ -835,6 +902,7 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
 
     deleteTodo: async (id) => {
       const record = todos.get(id)
+      await archiveFocus('todo', record)
       const removed = await todos.delete(id)
       await dropAssetsOf(record)
       return removed
@@ -913,6 +981,45 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
         // window may have finished it already.
         focusSessions: withClosedSession(record.focusSessions, sessionId, endedAt),
       }))
+    },
+
+    focusSources() {
+      const byEntry = new Map<string, FocusSource>()
+      /** Session ids already claimed, so a half-applied delete cannot double one. */
+      const seen = new Set<string>()
+      const add = (owner: OwnerKind, id: string, title: string, session: FocusSession): void => {
+        if (seen.has(session.id)) return
+        seen.add(session.id)
+        const key = `${owner}:${id}`
+        const current = byEntry.get(key)
+        byEntry.set(key, current === undefined
+          ? { owner, id, title, sessions: [session] }
+          : { ...current, sessions: [...current.sessions, session] })
+      }
+      // Live entries first: when an interrupted delete left a session in both
+      // places, the record's copy — and its current title — is the one that wins.
+      for (const [, record] of media.entries()) {
+        for (const session of record.focusSessions) add('media', record.id, record.title, session)
+      }
+      for (const [, record] of tasks.entries()) {
+        for (const session of record.focusSessions) add('task', record.id, record.title, session)
+      }
+      for (const [, record] of todos.entries()) {
+        for (const session of record.focusSessions) add('todo', record.id, record.title, session)
+      }
+      // Then the ledger: rows whose entry is gone, and the ones a half-applied
+      // delete left in both places (skipped above by session id).
+      for (const [, day] of ledger.days()) {
+        for (const item of day.items) {
+          if (item.kind !== 'focus') continue
+          add(item.entryKind, item.entry, item.title, {
+            id: item.id,
+            startedAt: item.startedAt,
+            endedAt: item.endedAt,
+          })
+        }
+      }
+      return [...byEntry.values()]
     },
 
     sweepOrphanAssets: async () => {

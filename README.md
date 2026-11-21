@@ -86,11 +86,13 @@ dsh --profile web --patch D:/Projects/dsh-personal-track/dev.patch.yml
 
 `~/.dsh/storages/habit/`，人类可读的 JSON，per-record 布局：
 `days/<日期>.json`（一个习惯日）、`counters/laundry.json`（待洗存量）、
-`media/<id>.json`、`tasks/<id>.json`（登记条目）、`assets/<id>.json`（素材图片字节）。
+`media/<id>.json`、`tasks/<id>.json`、`todos/<id>.json`（登记条目）、
+`assets/<id>.json`（素材图片字节）、`time/<日期>.json`（**时间账本**：已关闭的专注与对话停留）、
+`presence/<日期>.json`（对话 presence 的原始事件，只留最近三天）。
 **空白天不产生文档**；只存事实，格数、比率、连续、逾期、专注时长都是读的时候派生的。
 
-**备份**：统计视图的「导出」得到 `personal-track-<日期>.json`（格式 `personal-track/backup`，版本 3），
-只含事实——导入后重算一切派生值，所以文件里不可能出现与数据矛盾的字段。v1 / v2 仍可导入；反向不行
+**备份**：统计视图的「导出」得到 `personal-track-<日期>.json`（格式 `personal-track/backup`，版本 6），
+只含事实——导入后重算一切派生值，所以文件里不可能出现与数据矛盾的字段。v1–v5 仍可导入；反向不行
 （旧的构建会整份拒绝它不认识的版本）。「选择备份…」只解析并显示条数，此时还没写入；随后选**合并**
 （同键覆盖）或**覆盖**（额外删掉文件里没有的本地记录），整份先按同一套 schema 校验，任何一条不合法即整份拒绝。
 
