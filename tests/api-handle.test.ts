@@ -818,6 +818,7 @@ await checkAsync('every write answers a habit-day slice', async () => {
     { method: 'POST', path: '/material', body: { kind: 'task', id: taskId, text: '## 第二块', date: DATE } },
     { method: 'PATCH', path: '/material', body: { kind: 'task', id: taskId, materialId, text: '## 改过', date: DATE } },
     { method: 'DELETE', path: `/material?kind=task&id=${taskId}&materialId=${materialId}&date=${DATE}` },
+    { method: 'POST', path: '/image/prune', body: { date: DATE } },
     { method: 'POST', path: '/focus', body: { kind: 'task', id: taskId, date: DATE } },
     { method: 'PATCH', path: '/focus', body: { kind: 'task', id: taskId, sessionId, date: DATE } },
     { method: 'DELETE', path: `/tasks?id=${taskId}&date=${DATE}` },

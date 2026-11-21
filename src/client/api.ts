@@ -152,6 +152,14 @@ export interface HabitClient {
   removeMaterial(owner: RegistryKind, id: string, materialId: string, viewpoint?: Viewpoint): Promise<EntryAnswer>
   /** Delete every stored image nothing references. */
   sweepAssets(): Promise<SweepResult>
+  /**
+   * Delete the images on entries that are finished with.
+   *
+   * Irreversible, and it takes the bytes out of every later export too — which
+   * is why the answer says how much went instead of leaving the caller to
+   * subtract the list it had before.
+   */
+  pruneImages(viewpoint?: Viewpoint): Promise<PruneAnswer>
   /** Open a focus session; a session a crash left open is dropped first. */
   startFocus(owner: RegistryKind, id: string, viewpoint?: Viewpoint): Promise<FocusAnswer>
   /**
@@ -292,6 +300,20 @@ export interface FocusAnswer extends EntryAnswer {
 export interface SweepResult {
   readonly ok: true
   readonly removed: number
+}
+
+/**
+ * What an image prune answers: the adopted slice, and what it took.
+ *
+ * Not a `SweepResult`: this one changes entries, so it answers the same slice
+ * every other write does — the card adopts it and reports the numbers in the
+ * same breath, with nothing left to re-read.
+ */
+export interface PruneAnswer extends StateView {
+  /** Entries whose material list lost at least one image. */
+  readonly entries: number
+  readonly images: number
+  readonly bytes: number
 }
 
 /** One image on its way into the store. */
@@ -530,6 +552,16 @@ export function createHabitClient(options: HabitClientOptions = {}): HabitClient
       if (typeof value.removed !== 'number') staleHost()
       return value
     },
+    pruneImages: async viewpoint => {
+      const value = await request<PruneAnswer>(
+        url('pruneImages'),
+        body('pruneImages', withDay(viewpoint, {})),
+      )
+      // A host half from before this route answers `{ ok: true }` and nothing
+      // else; saying "0 images" there would look like a successful no-op.
+      if (typeof value.images !== 'number') staleHost()
+      return value
+    },
     startFocus: async (owner, id, viewpoint) => {
       const value = await request<FocusAnswer>(
         url('focusStart'),
@@ -546,7 +578,14 @@ export function createHabitClient(options: HabitClientOptions = {}): HabitClient
         ...(options?.keepalive === true ? { keepalive: true } : {}),
       },
     ),
-    stats: (from, to) => request<StatsView>(url('stats', { from, to })),
+    stats: async (from, to) => {
+      const value = await request<StatsView>(url('stats', { from, to }))
+      // The data card reads these two numbers directly, so a host half from
+      // before the image prune answered without them would surface as a
+      // TypeError in the middle of a render instead of as "restart dsh".
+      if (value.completedImages === undefined) staleHost()
+      return value
+    },
     // The time view is newer than the route table a running host may have
     // loaded. A 404 here is a stale host half, not a missing record: say so,
     // instead of the dictionary's "no such record" for a route that is absent.

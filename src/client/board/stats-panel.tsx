@@ -232,7 +232,10 @@ export function StatsPanel({ client }: StatsPanelProps): JSX.Element {
   const [stats, setStats] = useState<StatsView | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  /** Bumped after an import, so the range is re-read from the new records. */
+  /**
+   * Bumped after a write that changed stored data — an import, or the image
+   * prune — so the range is re-read from the new records.
+   */
   const [reload, setReload] = useState(0)
 
   const today = clock?.today ?? ''
@@ -420,7 +423,11 @@ export function StatsPanel({ client }: StatsPanelProps): JSX.Element {
               </Tile>
             </div>
 
-            <DataCard client={client} onImported={() => setReload(value => value + 1)} />
+            <DataCard
+              client={client}
+              completedImages={stats.completedImages}
+              onChanged={() => setReload(value => value + 1)}
+            />
           </>
         )}
     </div>

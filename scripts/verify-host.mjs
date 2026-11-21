@@ -687,5 +687,61 @@ assert.equal(badPresence.status, 400, 'an incomplete presence ping is refused')
 await presenceSource.stop()
 console.log('presence ✓  (host-stamped raw events become the conversation band)')
 
+// --- the image prune: bytes leave the disk and the export ---------------------
+// Everything above needed one image to survive a restart and a backup round-trip,
+// so the deletion gets its own root and runs last. What it proves is the promise
+// the card makes before it asks: "the export will not carry them either".
+const PRUNE_ROOT = join('.tmp', 'verify-host-prune')
+await rm(PRUNE_ROOT, { recursive: true, force: true })
+const pruning = await mount(PRUNE_ROOT)
+const finishedTask = await pruning.call('POST', '/tasks', {
+  title: 'L7.2 矩阵的秩', progress: { current: 2, total: 2 },
+})
+assert.equal(finishedTask.body.entry.state, 'done', 'a filled progress is a finished task')
+const finishedId = finishedTask.body.entry.id
+const pruneImage = await pruning.call('POST', '/asset', {
+  kind: 'task', id: finishedId, mime: 'image/png', data: TINY_PNG, name: '讲义.png',
+})
+const pruneAssetId = pruneImage.body.entry.materials[0].assetId
+await pruning.call('POST', '/material', { kind: 'task', id: finishedId, text: '## 要点' })
+
+const pruneBytes = Buffer.from(TINY_PNG, 'base64').length
+const before = (await pruning.call('GET', `/stats?from=${DATE}&to=${DATE}`)).body
+assert.deepEqual(
+  before.completedImages,
+  { count: 1, bytes: pruneBytes },
+  'the card is told the count and the size before it offers anything',
+)
+
+const pruneCall = await pruning.call('POST', '/image/prune', { date: DATE })
+assert.equal(pruneCall.status, 200)
+assert.equal(pruneCall.body.day.date, DATE, 'the prune answers the viewpoint’s day slice like every write')
+assert.equal(pruneCall.body.images, 1)
+assert.equal(pruneCall.body.entries, 1)
+assert.equal(pruneCall.body.bytes, pruneBytes, 'the bytes it reports are the bytes it freed')
+const afterPrune = pruneCall.body.tasks.find(task => task.id === finishedId)
+assert.deepEqual(
+  afterPrune.materials.map(material => material.kind),
+  ['md'],
+  'the outline stays, the screenshot goes',
+)
+
+const assetPath = join(PRUNE_ROOT, 'habit', 'assets', `${pruneAssetId}.json`)
+const assetLeft = await readFile(assetPath, 'utf8').then(() => true, () => false)
+assert.equal(assetLeft, false, 'the asset document left the disk, not just the reference')
+assert.equal((await pruning.raw('GET', `/asset?id=${pruneAssetId}`)).status, 404, 'and the route says so')
+
+const prunedFile = (await pruning.call('GET', '/backup')).body.backup
+assert.equal(prunedFile.assets.length, 0, 'the export no longer carries the bytes')
+assert.equal(prunedFile.tasks[0].materials.length, 1, 'the entry travels with its outline only')
+assert.deepEqual(
+  (await pruning.call('GET', `/stats?from=${DATE}&to=${DATE}`)).body.completedImages,
+  { count: 0, bytes: 0 },
+  'and the card has nothing left to offer',
+)
+await pruning.stop()
+await rm(PRUNE_ROOT, { recursive: true, force: true })
+console.log('image prune ✓  (bytes off the disk and out of the export, with the count reported)')
+
 await rm(ROOT, { recursive: true, force: true })
 console.log('\nhost half ✓  full API round-trip against real storage')

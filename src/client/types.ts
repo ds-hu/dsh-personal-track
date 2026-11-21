@@ -543,6 +543,17 @@ export interface StatsView {
     readonly doing: number
     readonly overdue: number
   }
+  /**
+   * The images on entries that are finished with: what the data card's
+   * "delete images on completed entries" would take.
+   *
+   * Range-independent, like the other registry totals, and read from the same
+   * rule the host deletes by — so this number is a promise the button can keep.
+   */
+  readonly completedImages: {
+    readonly count: number
+    readonly bytes: number
+  }
   /** Focus time over all three registries: closed sessions that started in range. */
   readonly focus: {
     readonly seconds: number

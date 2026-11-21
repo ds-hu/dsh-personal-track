@@ -149,6 +149,19 @@ export interface StatsView {
     readonly overdue: number
   }
   /**
+   * The images "delete images on completed entries" would take.
+   *
+   * Independent of the range, like the other registry totals: an entry finished
+   * last year still holds its screenshots today. It lives here rather than on a
+   * route of its own because the card that offers the deletion is drawn from
+   * this answer — a second request would be a second number that could disagree
+   * with the first.
+   */
+  readonly completedImages: {
+    readonly count: number
+    readonly bytes: number
+  }
+  /**
    * Time spent in focus mode, over all three registries.
    *
    * A session belongs to the habit day it **started** on, and only closed ones
@@ -440,5 +453,6 @@ export function buildStats(
       overdue: registry.tasks.filter(task => task.overdue).length,
     },
     focus,
+    completedImages: store.completedImageUsage(),
   }
 }

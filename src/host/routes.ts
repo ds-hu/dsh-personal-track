@@ -757,6 +757,22 @@ export const handlers: Record<RouteName, RouteHandler> = {
     return { ok: true, removed }
   },
 
+  /**
+   * Delete the images hanging off entries that are finished with.
+   *
+   * Unlike the sweep this changes entries, so it answers the viewpoint's slice
+   * like every other write — and that is all it needs, because a slice already
+   * carries all three registries. The counts ride along for the sentence the
+   * card shows afterwards: "deleted 19 images, 13.0 MB" has to be the host's
+   * number, not one the client guessed from the list it had.
+   */
+  async pruneImages(ctx, body) {
+    const raw = ctx.parse(z.object(VIEWPOINT), body, 'image prune')
+    const date = ctx.dateOf(raw, ctx.today())
+    const removed = await ctx.store.pruneCompletedImages()
+    return { ...writeAnswer(ctx, date), ...removed }
+  },
+
   async addMaterial(ctx, body) {
     const raw = ctx.parse(ownerTarget.extend({
       ...VIEWPOINT,

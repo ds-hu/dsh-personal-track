@@ -150,6 +150,25 @@ export interface NewImage {
   readonly name?: string
 }
 
+/**
+ * How much of the stored images sits on entries that are finished with.
+ *
+ * The number the stats card shows before it offers to delete them, and the same
+ * walk {@link HabitStore.pruneCompletedImages} performs — one rule, so the
+ * preview cannot promise what the deletion will not take.
+ */
+export interface ImageUsage {
+  readonly count: number
+  readonly bytes: number
+}
+
+/** What one image prune took: the entries it changed, and what went. */
+export interface PruneResult {
+  readonly entries: number
+  readonly images: number
+  readonly bytes: number
+}
+
 /** Everything derived from one habit day, with its document read once. */
 export interface DayFacts {
   readonly date: DayKey
@@ -240,6 +259,16 @@ export interface HabitStore {
   endFocus(owner: OwnerKind, id: string, sessionId: string): Promise<void>
   /** Delete every asset nothing references; answers how many went. */
   sweepOrphanAssets(): Promise<number>
+  /** The images on finished entries — what the prune below would take. */
+  completedImageUsage(): ImageUsage
+  /**
+   * Delete those images: the references **and** their bytes.
+   *
+   * Only images. A Markdown block on a finished entry is the outline of what was
+   * done, and it is a few kilobytes — deleting it would trade content for
+   * nothing. Text and focus sessions stay on the entry untouched.
+   */
+  pruneCompletedImages(): Promise<PruneResult>
   newId(): string
 }
 
@@ -363,6 +392,22 @@ const CHECK_LIMIT_MESSAGE: Record<CheckHabit, string> = {
   wash: 'that habit is already recorded twice today',
   shower: 'that habit is already recorded once today',
 }
+
+/**
+ * Whether a registry entry is finished with — the one rule the image prune and
+ * its preview share.
+ *
+ * Three registries, three different facts, and none of them is a stored
+ * "completed" flag: a task's state is derived from its progress axis, a film's
+ * is a status someone chose, a todo's `done` is its own. A **dropped** film is
+ * deliberately not finished: it never reached the state this rule is about, so
+ * its screenshots stay until the entry itself is deleted.
+ */
+const FINISHED = {
+  media: (record: MediaRecord): boolean => record.status === 'done',
+  task: (record: TaskRecord): boolean => taskState(record) === 'done',
+  todo: (record: TodoRecord): boolean => record.done,
+} as const
 
 /** Build the store over an opened domain. */
 export function createHabitStore(domain: HabitDomain, config: Config): HabitStore {
@@ -885,6 +930,69 @@ export function createHabitStore(domain: HabitDomain, config: Config): HabitStor
         if (await assets.delete(assetId)) removed += 1
       }
       return removed
+    },
+
+    completedImageUsage: () => {
+      let count = 0
+      let bytes = 0
+      const add = (materials: readonly Material[]): void => {
+        for (const material of materials) {
+          if (material.kind !== 'image') continue
+          count += 1
+          // A material whose bytes are already gone is not space to reclaim:
+          // it holds none. Counting it would promise a saving the prune cannot
+          // deliver, and the sweep would not find it either.
+          const asset = assets.get(material.assetId)
+          if (asset !== undefined) bytes += base64Bytes(asset.data)
+        }
+      }
+      for (const [, record] of media.entries()) if (FINISHED.media(record)) add(record.materials)
+      for (const [, record] of tasks.entries()) if (FINISHED.task(record)) add(record.materials)
+      for (const [, record] of todos.entries()) if (FINISHED.todo(record)) add(record.materials)
+      return { count, bytes }
+    },
+
+    pruneCompletedImages: async () => {
+      // The ids are collected first: a table updated while it is being iterated
+      // is the one shape this store never asks its backend to survive.
+      const finished: { readonly owner: OwnerKind; readonly id: string }[] = [
+        ...[...media.entries()]
+          .filter(([, record]) => FINISHED.media(record))
+          .map(([id]) => ({ owner: 'media' as const, id })),
+        ...[...tasks.entries()]
+          .filter(([, record]) => FINISHED.task(record))
+          .map(([id]) => ({ owner: 'task' as const, id })),
+        ...[...todos.entries()]
+          .filter(([, record]) => FINISHED.todo(record))
+          .map(([id]) => ({ owner: 'todo' as const, id })),
+      ]
+      let entries = 0
+      let images = 0
+      let bytes = 0
+      for (const { owner, id } of finished) {
+        // Read the references before the write: once the materials are gone,
+        // the asset ids they carried are unrecoverable from the record — the
+        // same order `removeMaterial` uses, for the same reason.
+        const before = registryTable(owner).get(id)
+        if (before === undefined) continue
+        const gone = before.materials.flatMap(material => material.kind === 'image' ? [material.assetId] : [])
+        if (gone.length === 0) continue
+        // Record first, bytes second, like `dropAssetsOf`: a crash in between
+        // leaves an orphan the sweep can find, never a material pointing at
+        // nothing.
+        await updateRegistry(owner, id, record => ({
+          ...record,
+          materials: record.materials.filter(material => material.kind !== 'image'),
+        }))
+        entries += 1
+        images += gone.length
+        for (const assetId of gone) {
+          const asset = assets.get(assetId)
+          if (asset !== undefined) bytes += base64Bytes(asset.data)
+          await assets.delete(assetId)
+        }
+      }
+      return { entries, images, bytes }
     },
 
     newId: () => randomUUID(),

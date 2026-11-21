@@ -393,7 +393,7 @@ export const COPY = {
   'todo.markUndone': { zh: '取消完成', en: 'Mark not done' },
   'todo.remove': { zh: '删除这条待办', en: 'Delete this todo' },
 
-  // ---- data in and out (export / import / sweep) -----------------------
+  // ---- data in and out (export / import / sweep / prune) ---------------
   'data.title': { zh: '数据', en: 'Data' },
   'data.pending': { zh: '待导入 {name}', en: '{name} to import' },
   'data.export': { zh: '导出', en: 'Export' },
@@ -419,6 +419,19 @@ export const COPY = {
   },
   'data.swept': { zh: '已清理 {count} 张未引用的图片', en: 'Swept {count} unreferenced images' },
   'data.nothingToSweep': { zh: '没有可清理的图片', en: 'Nothing to sweep' },
+  // The deliberate deletion: images on entries that are finished with. Two
+  // steps, and the first one says what the second will cost.
+  'data.prune': { zh: '删除已完成图片', en: 'Delete images of finished entries' },
+  'data.prune.confirm': {
+    zh: '{count} 张图片 · {size}，导出里也不会再有',
+    en: '{count} images · {size}; the export will not carry them either',
+  },
+  'data.prune.do': { zh: '删除 {count} 张', en: 'Delete {count}' },
+  'data.pruned': { zh: '已删除 {count} 张图片 · {size}', en: 'Deleted {count} images · {size}' },
+  // Only reachable when those images' bytes were already gone (a dangling
+  // reference nothing else cleans up): there is a count to report, no size.
+  'data.prunedCount': { zh: '已删除 {count} 张图片', en: 'Deleted {count} images' },
+  'data.nothingToPrune': { zh: '没有可删除的图片', en: 'Nothing to delete' },
   'data.tooBig': { zh: '文件超过 64 MB，可能不是本插件的备份', en: 'That file is over 64 MB and is probably not this plugin’s backup' },
   'data.badJson': { zh: '文件不是合法的 JSON', en: 'That file is not valid JSON' },
   'data.notBackup': { zh: '这不是本插件的备份文件', en: 'That file is not this plugin’s backup' },

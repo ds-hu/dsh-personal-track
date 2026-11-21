@@ -104,6 +104,15 @@ export const routes = {
   asset: { method: 'GET', request: '/asset' },
   addAsset: { method: 'POST', request: '/asset' },
   sweepAssets: { method: 'POST', request: '/asset/sweep' },
+  /**
+   * Delete the images hanging off entries that are finished with.
+   *
+   * Not a second form of `sweepAssets`, and the path says so: the sweep takes
+   * bytes nothing references, while this one takes images an entry still points
+   * at — the screenshots on a course task you already finished. It answers a
+   * **习惯日** slice like the other writes, because it does change entries.
+   */
+  pruneImages: { method: 'POST', request: '/image/prune' },
   addMaterial: { method: 'POST', request: '/material' },
   patchMaterial: { method: 'PATCH', request: '/material' },
   removeMaterial: { method: 'DELETE', request: '/material' },

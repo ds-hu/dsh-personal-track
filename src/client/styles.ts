@@ -130,6 +130,16 @@ body[data-ds-dark-theme] .pt-track {
 .pt-ghost:active:not(:disabled), .pt-btn:active:not(:disabled) { transform: scale(.97); }
 .pt-ghost:disabled, .pt-btn:disabled { opacity: .35; cursor: default; }
 
+/*
+ * The commit side of a destructive confirm.
+ *
+ * Red is not a new colour: it is the family overdue and today's due date
+ * already use, and it appears on exactly one button — the one that cannot be
+ * taken back. Kept out of .pt-ghost so every other outlined pill stays grey.
+ */
+.pt-danger { border-color: var(--pt-red-line); background: var(--pt-red-soft); opacity: 1; font-weight: 500; }
+.pt-danger:hover:not(:disabled) { background: rgba(232,96,96,.24); border-color: var(--pt-red); }
+
 /* Always worn together with .pt-btn; it only has to say "accent". */
 .pt-btn-primary {
   border-color: var(--pt-accent-line); background: var(--pt-accent-soft);
@@ -228,8 +238,27 @@ body[data-ds-dark-theme] .pt-track {
 .pt-tile-meta { margin-left: auto; font-size: 11px; opacity: .65; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pt-tile-meta + .pt-tile-actions { margin-left: 4px; }
 .pt-tile-actions { display: inline-flex; gap: 3px; margin-left: auto; }
-.pt-tile-foot { display: flex; align-items: center; gap: 6px; }
+/*
+ * The card's action row wraps.
+ *
+ * It used to be a single line, and three actions fit; the data card carries
+ * four now, and at 360px an unwrapped row either overflows the tile or clips
+ * the last button. Wrapping is the honest answer: the fourth action lands on
+ * its own line instead of disappearing off the edge.
+ */
+.pt-tile-foot { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .pt-rows { display: flex; flex-direction: column; gap: 5px; }
+/*
+ * The one row that asks before it destroys.
+ *
+ * It never wraps. A wrapped confirm put the commit under the sentence and the
+ * cancel under that, which reads as two separate offers; here the sentence
+ * takes whatever width is left and breaks inside itself, and the two buttons
+ * stay together on the right.
+ */
+.pt-confirm { display: flex; align-items: center; gap: 6px; }
+.pt-confirm > .pt-muted { flex: 1 1 auto; min-width: 0; }
+.pt-confirm > button { flex: none; }
 
 /* ---- recorded times -------------------------------------------------- */
 .pt-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 22px; }

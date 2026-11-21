@@ -91,6 +91,7 @@ const CALLS: readonly (readonly [RouteName, (client: ReturnType<typeof createHab
   ['asset', client => client.assetUrl('a1')],
   ['addAsset', client => client.addImageMaterial('task', 't1', { mime: 'image/png', data: 'AA==', name: 'x.png' })],
   ['sweepAssets', client => client.sweepAssets()],
+  ['pruneImages', client => client.pruneImages()],
   ['addMaterial', client => client.addTextMaterial('task', 't1', '## 标题')],
   ['patchMaterial', client => client.patchTextMaterial('task', 't1', 'm1', '改过')],
   ['removeMaterial', client => client.removeMaterial('task', 't1', 'm1')],
@@ -174,7 +175,9 @@ const PAYLOADS: Partial<Record<RouteName, unknown>> = {
   clock: { today: '2026-09-16', nightTail: false, now: 'x', config: {} },
   state: { ok: true, day: { date: '2026-09-16' }, tasks: [], media: [], todos: [] },
   exportBackup: { ok: true, backup: { format: 'x' } },
+  stats: { completedImages: { count: 0, bytes: 0 } },
   sweepAssets: { ok: true, removed: 0 },
+  pruneImages: { ok: true, day: { date: '2026-09-16' }, tasks: [], media: [], todos: [], entries: 0, images: 0, bytes: 0 },
   focusStart: { ok: true, sessionId: 's1', entry: { id: 't1' } },
 }
 

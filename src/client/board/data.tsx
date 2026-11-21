@@ -6,6 +6,11 @@
  * it holds; nothing is written until a mode is chosen, and the destructive mode
  * (`replace`, which also drops every record the file omits) is labelled as such.
  * The file is validated by the host before any of it is applied.
+ *
+ * The image prune is two-step for the same reason and a different one: picking
+ * *which* images go is a rule the host owns (the ones on finished entries), so
+ * the only thing left to decide is whether to lose them — and the answer is a
+ * count and a size, shown before the button that commits, not after.
  */
 import { useReducer, useRef, useState, type JSX } from 'react'
 import type { HabitClient } from '../api.ts'
@@ -13,6 +18,7 @@ import { useCopy, type Copy } from '../copy/index.tsx'
 import type { BackupBundle, ImportMode } from '../types.ts'
 import { IMPORT_IDLE, importer, isBusy, stagedFile, type StagedFile } from './editor-state.ts'
 import { messageOf } from './format.ts'
+import { byteSizeText } from './image-input.ts'
 import { IconButton, Tile, TileHead } from './tile.tsx'
 
 /** A file bigger than this is refused before it is parsed. */
@@ -39,24 +45,35 @@ async function stage(file: File, t: Copy): Promise<StagedFile> {
   return { name: file.name, bundle: shape as BackupBundle }
 }
 
+/**
+ * The image prune's two steps: the staged confirm, then the request itself.
+ *
+ * One value rather than two flags: "confirming and working at once" is not a
+ * state, and a pair of booleans makes it representable.
+ */
+type PruneStage = 'idle' | 'confirm' | 'working'
+
 /** Props for the data card. */
 export interface DataCardProps {
   readonly client: HabitClient
-  /** Called after a successful import so the panel can re-read its range. */
-  readonly onImported: () => void
+  /** The images the host says sit on finished entries: what the prune takes. */
+  readonly completedImages: { readonly count: number; readonly bytes: number }
+  /** Called after a write that changed stored data, so the panel re-reads it. */
+  readonly onChanged: () => void
 }
 
-/** Export the domain, or import one back. */
-export function DataCard({ client, onImported }: DataCardProps): JSX.Element {
+/** Export the domain, import one back, or reclaim the images on finished entries. */
+export function DataCard({ client, completedImages, onChanged }: DataCardProps): JSX.Element {
   const t = useCopy()
   const picker = useRef<HTMLInputElement | null>(null)
   // One value instead of four flags: "staged and failed at once" is not
   // representable, so a failed attempt cannot hide the file it was retrying.
   const [importState, dispatch] = useReducer(importer, IMPORT_IDLE)
+  const [pruneStage, setPruneStage] = useState<PruneStage>('idle')
   const [note, setNote] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const file = stagedFile(importState)
-  const busy = isBusy(importState)
+  const busy = isBusy(importState) || pruneStage === 'working'
 
   const report = (cause: unknown): void => {
     setError(messageOf(cause, t))
@@ -110,7 +127,7 @@ export function DataCard({ client, onImported }: DataCardProps): JSX.Element {
       })
         + (done.assets === 0 ? '' : t('data.imported.assets', { count: done.assets }))
         + (done.removed === 0 ? '' : t('data.imported.removed', { count: done.removed })))
-      onImported()
+      onChanged()
     } catch (cause) {
       dispatch({ kind: 'import-failed' })
       report(cause)
@@ -130,32 +147,111 @@ export function DataCard({ client, onImported }: DataCardProps): JSX.Element {
     }
   }
 
-  const staged = file === null ? null : file.bundle as Partial<BackupBundle>
+  /**
+   * Stage the image prune: show what it would take before it takes anything.
+   *
+   * Nothing to take is answered here rather than by a hidden button — a control
+   * that disappears at zero leaves the reader wondering whether it was ever
+   * there, and this card already answers "nothing to sweep" the same way.
+   */
+  const askPrune = (): void => {
+    setError(null)
+    if (completedImages.count === 0) {
+      setNote(t('data.nothingToPrune'))
+      return
+    }
+    setNote(null)
+    setPruneStage('confirm')
+  }
+
+  /** Commit it. The answer is a state slice, so there is nothing to re-read. */
+  const prune = async (): Promise<void> => {
+    setPruneStage('working')
+    try {
+      const result = await client.pruneImages()
+      const size = byteSizeText(result.bytes)
+      setError(null)
+      if (result.images === 0) {
+        // The number that staged this confirm was already stale — another
+        // window pruned first — so say that instead of "deleted 0 images".
+        setNote(t('data.nothingToPrune'))
+      } else if (size === '') {
+        // A count with nothing to weigh: those images were dangling references
+        // whose bytes were already gone, and a sentence with an empty "·" would
+        // be the only trace of them.
+        setNote(t('data.prunedCount', { count: result.images }))
+      } else {
+        setNote(t('data.pruned', { count: result.images, size }))
+      }
+      setPruneStage('idle')
+      onChanged()
+    } catch (cause) {
+      setPruneStage('idle')
+      report(cause)
+    }
+  }
+
+  // A staged import steps aside while the prune asks its question: two confirms
+  // in one card is two answers to "what am I about to lose".
+  const shown = pruneStage === 'idle' ? file : null
+  const staged = shown === null ? null : shown.bundle as Partial<BackupBundle>
   return (
     <Tile span={2}>
-      <TileHead title={t('data.title')} meta={file === null ? undefined : t('data.pending', { name: file.name })} />
+      <TileHead title={t('data.title')} meta={shown === null ? undefined : t('data.pending', { name: shown.name })} />
       <div className="pt-rows">
-        <div className="pt-tile-foot">
-          <button type="button" className="pt-primary" disabled={busy} onClick={() => void download()}>{t('data.export')}</button>
-          <button type="button" className="pt-ghost" disabled={busy} onClick={() => picker.current?.click()}>
-            {t('data.pick')}
-          </button>
-          <button type="button" className="pt-ghost" disabled={busy} onClick={() => void sweep()}>
-            {t('data.sweep')}
-          </button>
-          <input
-            ref={picker}
-            type="file"
-            accept="application/json,.json"
-            style={{ display: 'none' }}
-            onChange={(event) => {
-              const picked = event.target.files?.[0]
-              // Reset so picking the same file twice fires again.
-              event.target.value = ''
-              void pick(picked)
-            }}
-          />
-        </div>
+        {pruneStage === 'idle'
+          ? (
+            <div className="pt-tile-foot">
+              <button type="button" className="pt-primary" disabled={busy} onClick={() => void download()}>{t('data.export')}</button>
+              <button type="button" className="pt-ghost" disabled={busy} onClick={() => picker.current?.click()}>
+                {t('data.pick')}
+              </button>
+              <button type="button" className="pt-ghost" disabled={busy} onClick={() => void sweep()}>
+                {t('data.sweep')}
+              </button>
+              <button type="button" className="pt-ghost" disabled={busy} onClick={askPrune}>
+                {t('data.prune')}
+              </button>
+            </div>
+          )
+          : (
+            <div className="pt-confirm">
+              <span className="pt-muted">
+                {t('data.prune.confirm', {
+                  count: completedImages.count,
+                  size: byteSizeText(completedImages.bytes),
+                })}
+              </span>
+              <button
+                type="button"
+                className="pt-ghost pt-danger"
+                disabled={pruneStage === 'working'}
+                onClick={() => void prune()}
+              >
+                {t('data.prune.do', { count: completedImages.count })}
+              </button>
+              <button
+                type="button"
+                className="pt-ghost"
+                disabled={pruneStage === 'working'}
+                onClick={() => setPruneStage('idle')}
+              >
+                {t('form.cancel')}
+              </button>
+            </div>
+          )}
+        <input
+          ref={picker}
+          type="file"
+          accept="application/json,.json"
+          style={{ display: 'none' }}
+          onChange={(event) => {
+            const picked = event.target.files?.[0]
+            // Reset so picking the same file twice fires again.
+            event.target.value = ''
+            void pick(picked)
+          }}
+        />
 
         {staged === null ? null : (
           <div className="pt-tile-foot">

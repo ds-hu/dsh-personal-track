@@ -151,7 +151,7 @@ for (const method of [
   'exportAll', 'importAll',
   // materials and focus mode
   'assetUrl', 'addImageMaterial', 'addTextMaterial', 'patchTextMaterial', 'removeMaterial',
-  'sweepAssets', 'startFocus', 'endFocus',
+  'sweepAssets', 'pruneImages', 'startFocus', 'endFocus',
 ]) {
   assert.equal(typeof face.client[method], 'function', `the face exposes ${method}()`)
 }
